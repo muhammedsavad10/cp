@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { getUser } from './api';
+import { getToken, getUser } from './api';
 
 export function useWebSocket(onEvent) {
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef(null);
   const heartbeatTimerRef = useRef(null);
   const reconnectTimerRef = useRef(null);
-  const user = getUser();
 
   const connect = useCallback(() => {
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
       return;
     }
+
+    const token = getToken();
+    if (!token) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname === 'localhost' && window.location.port === '3000'
@@ -25,24 +27,18 @@ export function useWebSocket(onEvent) {
     ws.onopen = () => {
       setIsConnected(true);
 
-      // Register client role
-      const currentUser = getUser();
-      if (currentUser) {
-        ws.send(JSON.stringify({
-          type: 'REGISTER',
-          role: currentUser.role,
-          stall_id: currentUser.stall_id || 1
-        }));
-      }
+      // Authenticate socket with JWT token
+      ws.send(JSON.stringify({
+        type: 'REGISTER',
+        token
+      }));
 
-      // Start periodic heartbeats for STALL role
+      // Start periodic heartbeats
       if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
       heartbeatTimerRef.current = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
-          const u = getUser();
           ws.send(JSON.stringify({
-            type: 'HEARTBEAT',
-            stall_id: u?.stall_id || 1
+            type: 'HEARTBEAT'
           }));
         }
       }, 4000);
@@ -63,7 +59,6 @@ export function useWebSocket(onEvent) {
       setIsConnected(false);
       if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
 
-      // Reconnect after 3s
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = setTimeout(() => {
         connect();

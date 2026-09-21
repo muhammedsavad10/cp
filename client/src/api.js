@@ -24,9 +24,17 @@ const fetchAPI = async (endpoint, options = {}) => {
     headers
   });
 
+  if (response.status === 401) {
+    removeToken();
+    removeUser();
+  }
+
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.error || 'API Request failed');
+    const err = new Error(data.error || 'API Request failed');
+    err.status = response.status;
+    err.data = data;
+    throw err;
   }
 
   return data;
@@ -38,14 +46,17 @@ export const api = {
 
   // Stall Worker
   getStallDashboard: () => fetchAPI('/stall/dashboard'),
-  sellOne: () => fetchAPI('/stall/sell', { method: 'POST' }),
-  confirmReceipt: (dispatch_id) => fetchAPI('/stall/confirm-receipt', { method: 'POST', body: JSON.stringify({ dispatch_id }) }),
+  sellOne: (idempotency_key) => fetchAPI('/stall/sell', { method: 'POST', body: JSON.stringify({ idempotency_key }) }),
+  confirmReceipt: (dispatch_id, received_quantity) => fetchAPI('/stall/confirm-receipt', { method: 'POST', body: JSON.stringify({ dispatch_id, received_quantity }) }),
+  undoLastSale: () => fetchAPI('/stall/undo-last', { method: 'POST' }),
   submitWastage: (payload) => fetchAPI('/stall/wastage', { method: 'POST', body: JSON.stringify(payload) }),
   closeDay: (payload) => fetchAPI('/stall/close-day', { method: 'POST', body: JSON.stringify(payload) }),
 
   // Admin
   getAdminDashboard: () => fetchAPI('/admin/dashboard'),
   dispatchStock: (payload) => fetchAPI('/admin/dispatch', { method: 'POST', body: JSON.stringify(payload) }),
+  voidSale: (payload) => fetchAPI('/admin/void-sale', { method: 'POST', body: JSON.stringify(payload) }),
+  reopenDay: (payload) => fetchAPI('/admin/reopen-day', { method: 'POST', body: JSON.stringify(payload) }),
   getSalesLog: () => fetchAPI('/admin/sales'),
   getStockLog: () => fetchAPI('/admin/stock'),
   getMoneyLog: () => fetchAPI('/admin/money'),
