@@ -455,6 +455,7 @@ export default function AdminDashboard({ onLogout }) {
                 <div>Sold Today: <strong className="num">{metrics.totalSold || 0}</strong> glasses</div>
                 <div>Wastage Today: <strong className="num">{metrics.totalWastage || 0}</strong> glasses</div>
                 <div>Expected Remaining: <strong className="num">{metrics.expectedRemaining || 0}</strong> glasses</div>
+                <div>Total Sales: <strong className="num">₹{(stall1.revenue || 0).toLocaleString('en-IN')}</strong></div>
               </div>
             </div>
           )}
