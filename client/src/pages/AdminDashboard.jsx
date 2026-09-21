@@ -304,13 +304,15 @@ export default function AdminDashboard({ onLogout }) {
                 {/* Row 3 */}
                 <div className="kpi-card">
                   <div className="kpi-label">Total Sales</div>
-                  <div className="kpi-val num">{stall1.sold || 0}</div>
+                  <div className="kpi-val num">
+                    {closing ? `₹${(stall1.revenue || 0).toLocaleString('en-IN')}` : '—'}
+                  </div>
                 </div>
 
                 <div className="kpi-card">
-                  <div className="kpi-label">Revenue</div>
+                  <div className="kpi-label">Profit</div>
                   <div className="kpi-val num">
-                    {closing ? `₹${(stall1.revenue || 0).toLocaleString('en-IN')}` : '—'}
+                    {closing ? `₹${(stall1.profit !== undefined ? stall1.profit : (stall1.revenue - (stall1.sold * 20)) || 0).toLocaleString('en-IN')}` : '—'}
                   </div>
                 </div>
               </div>
