@@ -277,9 +277,8 @@ export default function AdminDashboard({ onLogout }) {
 
                 <div className="kpi-card">
                   <div className="kpi-label">Sold</div>
-                  <div className="kpi-val num">{stall1.sold || 0}</div>
-                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginTop: '4px' }} className="num">
-                    {(stall1.received || 0) - (stall1.sold || 0)} items remaining
+                  <div className="kpi-val num" style={{ fontSize: '1.25rem', fontWeight: 800 }}>
+                    {stall1.sold || 0} <span style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--text-secondary)' }}>({(stall1.received || 0) - (stall1.sold || 0)} remaining)</span>
                   </div>
                 </div>
 
