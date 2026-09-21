@@ -253,10 +253,9 @@ export default function AdminDashboard({ onLogout }) {
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)' }}>
                     <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Stall 1</h1>
-                    <span className={`status-pill ${stall1.isOnline ? 'status-pill-green' : 'status-pill-amber'}`}>
-                      {stall1.isOnline ? 'Online' : 'Offline'}
+                    <span className={`status-pill ${stall1.status === 'LIVE' ? 'status-pill-green' : 'status-pill-amber'}`}>
+                      {stall1.status === 'LIVE' ? 'Live' : stall1.status === 'CLOSED' ? 'Closed' : stall1.status === 'NOT_STARTED' ? 'Not started' : 'Offline'}
                     </span>
-                    {closing && <span className="status-pill status-pill-green">Closed</span>}
                   </div>
                   <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
                     Today &bull; {dashboardData?.today} (IST)
@@ -264,46 +263,54 @@ export default function AdminDashboard({ onLogout }) {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-                  <span className="status-pill status-pill-green">Live</span>
+                  <span className={`status-pill ${stall1.status === 'LIVE' ? 'status-pill-green' : 'status-pill-amber'}`}>
+                    {stall1.status === 'LIVE' ? 'Live' : stall1.status === 'CLOSED' ? 'Closed' : stall1.status === 'NOT_STARTED' ? 'Not started' : 'Offline'}
+                  </span>
                   <span className="num">Updated {lastUpdated}s ago</span>
                 </div>
               </div>
 
-              {/* KPI Cards Grid */}
+              {/* KPI Cards Grid - Exactly 3 Rows (2 Columns each) */}
               <div className="kpi-grid" style={{ opacity: isWSConnected ? 1 : 0.6 }}>
+                {/* Row 1 */}
+                <div className="kpi-card">
+                  <div className="kpi-label">Dispatched</div>
+                  <div className="kpi-val num">{stall1.received || 0}</div>
+                </div>
+
                 <div className="kpi-card">
                   <div className="kpi-label">Sold</div>
+                  <div className="kpi-val num">{stall1.sold || 0}</div>
+                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginTop: '4px' }} className="num">
+                    {(stall1.received || 0) - (stall1.sold || 0)} items remaining
+                  </div>
+                </div>
+
+                {/* Row 2 */}
+                <div className="kpi-card">
+                  <div className="kpi-label">Cash collected</div>
+                  <div className="kpi-val num">
+                    {closing ? `₹${(closing.cash_received || 0).toLocaleString('en-IN')}` : '—'}
+                  </div>
+                </div>
+
+                <div className="kpi-card">
+                  <div className="kpi-label">UPI collected</div>
+                  <div className="kpi-val num">
+                    {closing ? `₹${(closing.upi_received || 0).toLocaleString('en-IN')}` : '—'}
+                  </div>
+                </div>
+
+                {/* Row 3 */}
+                <div className="kpi-card">
+                  <div className="kpi-label">Total Sales</div>
                   <div className="kpi-val num">{stall1.sold || 0}</div>
                 </div>
 
                 <div className="kpi-card">
                   <div className="kpi-label">Revenue</div>
-                  <div className="kpi-val num" style={{ color: 'var(--status-green)' }}>
-                    ₹{(stall1.revenue || 0).toLocaleString('en-IN')}
-                  </div>
-                </div>
-
-                <div className="kpi-card">
-                  <div className="kpi-label">Received</div>
-                  <div className="kpi-val num">{stall1.received || 0}</div>
-                </div>
-
-                <div className="kpi-card">
-                  <div className="kpi-label">Expected Rem.</div>
-                  <div className="kpi-val num">{stall1.expectedRemaining || 0}</div>
-                </div>
-
-                <div className="kpi-card">
-                  <div className="kpi-label">Cash Collected</div>
                   <div className="kpi-val num">
-                    ₹{((closing ? closing.cash_received : moneyLog?.cash) || 0).toLocaleString('en-IN')}
-                  </div>
-                </div>
-
-                <div className="kpi-card">
-                  <div className="kpi-label">UPI Collected</div>
-                  <div className="kpi-val num">
-                    ₹{((closing ? closing.upi_received : moneyLog?.upi) || 0).toLocaleString('en-IN')}
+                    {closing ? `₹${(stall1.revenue || 0).toLocaleString('en-IN')}` : '—'}
                   </div>
                 </div>
               </div>
@@ -424,8 +431,28 @@ export default function AdminDashboard({ onLogout }) {
           {/* 2. STALL VIEW */}
           {activeTab === 'stall' && (
             <div className="card">
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: 'var(--spacing-3)' }}>Stall 1 Status</h2>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--spacing-4)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)' }}>
+                  <h2 style={{ fontSize: '1.25rem', fontWeight: 800 }}>Stall 1</h2>
+                  <span className={`status-pill ${stall1.status === 'LIVE' ? 'status-pill-green' : 'status-pill-amber'}`}>
+                    {stall1.status === 'LIVE' ? 'Live' : stall1.status === 'CLOSED' ? 'Closed' : stall1.status === 'NOT_STARTED' ? 'Not started' : 'Offline'}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--spacing-3)', marginBottom: 'var(--spacing-4)' }}>
+                <div style={{ padding: 'var(--spacing-3)', backgroundColor: 'var(--bg-main)', borderRadius: 'var(--radius-md)' }}>
+                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>Day Started Time (IST)</div>
+                  <div style={{ fontWeight: 700, marginTop: '2px' }} className="num">{stall1.started_at ? formatTime(stall1.started_at) : 'Not started'}</div>
+                </div>
+
+                <div style={{ padding: 'var(--spacing-3)', backgroundColor: 'var(--bg-main)', borderRadius: 'var(--radius-md)' }}>
+                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>Day Closed Time (IST)</div>
+                  <div style={{ fontWeight: 700, marginTop: '2px' }} className="num">{stall1.closed_at ? formatTime(stall1.closed_at) : 'Not closed'}</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)', fontSize: '0.9375rem' }}>
                 <div>Stock Received: <strong className="num">{metrics.totalStockReceived || 0}</strong> glasses</div>
                 <div>Sold Today: <strong className="num">{metrics.totalSold || 0}</strong> glasses</div>
                 <div>Wastage Today: <strong className="num">{metrics.totalWastage || 0}</strong> glasses</div>
