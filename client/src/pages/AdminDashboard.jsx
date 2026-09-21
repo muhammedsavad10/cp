@@ -1,4 +1,24 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import {
+  LayoutDashboard,
+  Store,
+  Package,
+  ShoppingCart,
+  IndianRupee,
+  BarChart3,
+  Download,
+  Database,
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  X,
+  Unlock,
+  WifiOff,
+  RotateCcw,
+  Check,
+  Trash2,
+  CalendarCheck
+} from 'lucide-react';
 import { api } from '../api';
 import { useWebSocket } from '../useWebSocket';
 import Navbar from '../components/Navbar';
@@ -18,6 +38,7 @@ export default function AdminDashboard({ onLogout }) {
   const [loading, setLoading] = useState(true);
   const [actionSuccess, setActionSuccess] = useState('');
   const [error, setError] = useState('');
+  const [lastUpdated, setLastUpdated] = useState(0);
 
   const fetchAllData = useCallback(async () => {
     try {
@@ -34,6 +55,7 @@ export default function AdminDashboard({ onLogout }) {
       setStockLog(stock);
       setMoneyLog(money);
       setReportsData(reports);
+      setLastUpdated(0);
     } catch (err) {
       setError(err.message || 'Failed to fetch admin data');
     } finally {
@@ -54,6 +76,14 @@ export default function AdminDashboard({ onLogout }) {
     const interval = setInterval(fetchAllData, 15000);
     return () => clearInterval(interval);
   }, [fetchAllData]);
+
+  // Relative "Updated Ns ago" timer
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setLastUpdated(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const handleDispatch = async (e) => {
     if (e) e.preventDefault();
@@ -105,10 +135,7 @@ export default function AdminDashboard({ onLogout }) {
     }
   };
 
-  const handleBackup = () => {
-    window.open('/api/admin/backup', '_blank');
-  };
-
+  const handleBackup = () => window.open('/api/admin/backup', '_blank');
   const handleExportCSV = () => {
     const today = dashboardData?.today || new Date().toISOString().split('T')[0];
     window.open(`/api/admin/export.csv?from=${today}&to=${today}`, '_blank');
@@ -118,26 +145,22 @@ export default function AdminDashboard({ onLogout }) {
     if (!isoStr) return '—';
     try {
       return new Date(isoStr).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    } catch (e) {
-      return isoStr;
-    }
+    } catch (e) { return isoStr; }
   };
 
   const formatTimeShort = (isoStr) => {
     if (!isoStr) return '—';
     try {
       return new Date(isoStr).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
-    } catch (e) {
-      return isoStr;
-    }
+    } catch (e) { return isoStr; }
   };
 
   if (loading) {
     return (
-      <div className="app-container admin-container">
+      <div className="app-shell">
         <Navbar onLogout={onLogout} />
-        <div className="main-content" style={{ textAlign: 'center', paddingTop: 40 }}>
-          <p style={{ fontWeight: 700, color: 'var(--text-secondary)' }}>Loading Admin Dashboard...</p>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <p style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Loading Admin Portal...</p>
         </div>
       </div>
     );
@@ -147,555 +170,492 @@ export default function AdminDashboard({ onLogout }) {
   const stall1 = dashboardData?.stall1Status || {};
   const closing = dashboardData?.closing || null;
 
+  const NAV_ITEMS = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'stall', label: 'Stall', icon: Store },
+    { id: 'stock', label: 'Stock', icon: Package },
+    { id: 'sales', label: 'Sales', icon: ShoppingCart },
+    { id: 'money', label: 'Money', icon: IndianRupee },
+    { id: 'reports', label: 'Reports', icon: BarChart3 }
+  ];
+
   return (
-    <div className="app-container admin-container">
+    <div className="app-shell">
       <Navbar onLogout={onLogout} />
 
-      {/* Admin Navigation Tabs & Action Controls */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'white', borderBottom: '1px solid var(--border-color)', paddingRight: 16 }}>
-        <nav className="admin-tabs" style={{ borderBottom: 'none' }}>
-          {['dashboard', 'stall', 'stock', 'sales', 'money', 'reports'].map((tab) => (
-            <button
-              key={tab}
-              className={`tab-btn ${activeTab === tab ? 'active' : ''}`}
-              onClick={() => setActiveTab(tab)}
-            >
-              {tab.toUpperCase()}
+      <div className="admin-layout">
+        {/* Desktop Sidebar (>=1024px) */}
+        <aside className="admin-sidebar">
+          <div style={{ marginBottom: 'var(--spacing-6)' }}>
+            <h2 style={{ fontSize: '1.125rem', fontWeight: 800 }}>Admin Portal</h2>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>Cold Payasam MVP</p>
+          </div>
+
+          <nav style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-1)', flex: 1 }}>
+            {NAV_ITEMS.map((item) => {
+              const IconComp = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  className={`btn ${isActive ? 'btn-primary' : 'btn-quiet'}`}
+                  style={{ justifyContent: 'flex-start', minHeight: '44px' }}
+                  onClick={() => setActiveTab(item.id)}
+                >
+                  <IconComp size={18} strokeWidth={1.5} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)', paddingTop: 'var(--spacing-4)', borderTop: '1px solid var(--border-subtle)' }}>
+            <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8125rem', minHeight: '40px' }} onClick={handleBackup}>
+              <Database size={16} strokeWidth={1.5} />
+              <span>Backup DB</span>
             </button>
-          ))}
-        </nav>
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            type="button"
-            className="btn-action"
-            style={{ padding: '6px 12px', fontSize: '0.8rem', background: '#f1f5f9', color: '#1e293b' }}
-            onClick={handleBackup}
-          >
-            💾 Backup DB
-          </button>
-          <button
-            type="button"
-            className="btn-action"
-            style={{ padding: '6px 12px', fontSize: '0.8rem', background: '#e0e7ff', color: '#3730a3' }}
-            onClick={handleExportCSV}
-          >
-            📥 Export CSV
-          </button>
-        </div>
-      </div>
-
-      <main className="main-content">
-        {error && (
-          <div className="badge badge-danger" style={{ width: '100%', padding: 10 }}>
-            {error}
+            <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8125rem', minHeight: '40px' }} onClick={handleExportCSV}>
+              <Download size={16} strokeWidth={1.5} />
+              <span>Export CSV</span>
+            </button>
           </div>
-        )}
+        </aside>
 
-        {actionSuccess && (
-          <div className="badge badge-success" style={{ width: '100%', padding: 10 }}>
-            {actionSuccess}
-          </div>
-        )}
-
-        {/* 1. DASHBOARD VIEW */}
-        {activeTab === 'dashboard' && (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h2 style={{ fontSize: '1.3rem', fontWeight: 900, color: '#0f172a' }}>PAYASAM ADMIN</h2>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                  TODAY &bull; {dashboardData?.today} (IST)
-                </p>
-              </div>
-              <span className={`badge ${isWSConnected ? 'badge-success' : 'badge-warning'}`}>
-                {isWSConnected ? '⚡ Real-time Sync Active' : '🔌 Polling Mode'}
+        {/* Main Content Area */}
+        <main className="admin-content">
+          {/* Connection Lost Banner */}
+          {!isWSConnected && (
+            <div className="card" style={{ backgroundColor: 'var(--status-red-bg)', borderLeft: '4px solid var(--status-red)', color: 'var(--status-red)', padding: 'var(--spacing-3)', marginBottom: 'var(--spacing-4)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)' }}>
+              <WifiOff size={20} strokeWidth={1.5} />
+              <span style={{ fontSize: '0.9375rem', fontWeight: 600 }}>
+                Connection lost. Numbers may be out of date.
               </span>
             </div>
+          )}
 
-            {/* Flags Alert */}
-            {metrics.isOverSold && (
-              <div className="badge badge-warning" style={{ width: '100%', padding: 10 }}>
-                ⚠️ Flagged: Sold beyond recorded stock!
-              </div>
-            )}
-            {metrics.isLargeWastage && (
-              <div className="badge badge-danger" style={{ width: '100%', padding: 10 }}>
-                🚨 Flagged: Total wastage is &gt; 10% of total stock received today!
-              </div>
-            )}
+          {error && (
+            <div className="status-pill status-pill-red" style={{ width: '100%', marginBottom: 'var(--spacing-4)', padding: '10px' }}>
+              {error}
+            </div>
+          )}
 
-            {/* LIVE STALL STATUS CARD */}
-            <div className="card" style={{ background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)', border: '2px solid #cbd5e1' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          {actionSuccess && (
+            <div className="status-pill status-pill-green" style={{ width: '100%', marginBottom: 'var(--spacing-4)', padding: '10px' }}>
+              {actionSuccess}
+            </div>
+          )}
+
+          {/* 1. DASHBOARD VIEW */}
+          {activeTab === 'dashboard' && (
+            <div>
+              {/* Header with Stall Name, Status Pill & Relative Time */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--spacing-4)', flexWrap: 'wrap', gap: 'var(--spacing-2)' }}>
                 <div>
-                  <h3 style={{ fontSize: '1.25rem', fontWeight: 900, color: '#0f172a' }}>STALL 1</h3>
-                  <div style={{ marginTop: 2 }}>
-                    {stall1.isOnline ? (
-                      <span className="badge badge-success" style={{ fontSize: '0.9rem', padding: '4px 12px' }}>
-                        🟢 Stall 1 Online
-                      </span>
-                    ) : (
-                      <span className="badge badge-warning" style={{ fontSize: '0.9rem', padding: '4px 12px' }}>
-                        🟠 Stall 1 Offline
-                      </span>
-                    )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)' }}>
+                    <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Stall 1</h1>
+                    <span className={`status-pill ${stall1.isOnline ? 'status-pill-green' : 'status-pill-amber'}`}>
+                      {stall1.isOnline ? 'Online' : 'Offline'}
+                    </span>
+                    {closing && <span className="status-pill status-pill-green">Closed</span>}
+                  </div>
+                  <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                    Today &bull; {dashboardData?.today} (IST)
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                  <span className="status-pill status-pill-green">Live</span>
+                  <span className="num">Updated {lastUpdated}s ago</span>
+                </div>
+              </div>
+
+              {/* KPI Cards Grid */}
+              <div className="kpi-grid" style={{ opacity: isWSConnected ? 1 : 0.6 }}>
+                <div className="kpi-card">
+                  <div className="kpi-label">Sold</div>
+                  <div className="kpi-val num">{stall1.sold || 0}</div>
+                </div>
+
+                <div className="kpi-card">
+                  <div className="kpi-label">Revenue</div>
+                  <div className="kpi-val num" style={{ color: 'var(--status-green)' }}>
+                    ₹{(stall1.revenue || 0).toLocaleString('en-IN')}
                   </div>
                 </div>
 
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
-                    {stall1.isOnline ? 'Last Activity' : 'Last Synced'}
+                <div className="kpi-card">
+                  <div className="kpi-label">Received</div>
+                  <div className="kpi-val num">{stall1.received || 0}</div>
+                </div>
+
+                <div className="kpi-card">
+                  <div className="kpi-label">Expected Rem.</div>
+                  <div className="kpi-val num">{stall1.expectedRemaining || 0}</div>
+                </div>
+
+                <div className="kpi-card">
+                  <div className="kpi-label">Cash Collected</div>
+                  <div className="kpi-val num">
+                    ₹{((closing ? closing.cash_received : moneyLog?.cash) || 0).toLocaleString('en-IN')}
                   </div>
-                  <div style={{ fontWeight: 800, fontSize: '0.95rem', color: '#1e293b' }}>
-                    {formatTimeShort(stall1.lastSaleTime || stall1.lastSeen)}
+                </div>
+
+                <div className="kpi-card">
+                  <div className="kpi-label">UPI Collected</div>
+                  <div className="kpi-val num">
+                    ₹{((closing ? closing.upi_received : moneyLog?.upi) || 0).toLocaleString('en-IN')}
                   </div>
                 </div>
               </div>
 
-              {/* Live Stall Metrics Grid */}
-              <div className="stock-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 10 }}>
-                <div className="stock-item">
-                  <div className="stock-label">Received</div>
-                  <div className="stock-value">{stall1.received || 0}</div>
-                </div>
-                <div className="stock-item">
-                  <div className="stock-label">Sold</div>
-                  <div className="stock-value" style={{ color: '#059669' }}>{stall1.sold || 0}</div>
-                </div>
-                <div className="stock-item">
-                  <div className="stock-label">Wastage</div>
-                  <div className="stock-value" style={{ color: '#dc2626' }}>{stall1.wastage || 0}</div>
-                </div>
-                <div className="stock-item">
-                  <div className="stock-label">Expected Rem.</div>
-                  <div className="stock-value expected">{stall1.expectedRemaining || 0}</div>
-                </div>
-                <div className="stock-item">
-                  <div className="stock-label">Revenue</div>
-                  <div className="stock-value" style={{ color: '#047857' }}>₹{(stall1.revenue || 0).toLocaleString()}</div>
-                </div>
-              </div>
-
-              <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#64748b', fontWeight: 600 }}>
-                <span>Last transaction: <strong>{formatTime(stall1.lastSaleTime)}</strong></span>
-                <span>Reversals today: <strong>{metrics.reversalsToday || 0}</strong></span>
-              </div>
-            </div>
-
-            {/* TWO SEPARATE STATUSES: Stock Check & Money Check */}
-            <div className="card" style={{ padding: 16 }}>
-              <div className="card-title">Daily Closing Statuses</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div style={{ padding: 14, background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Stock Check</div>
-                  <div style={{ marginTop: 6 }}>
-                    {closing ? (
-                      closing.stock_status === 'MATCHED' ? (
-                        <span className="badge badge-success" style={{ fontSize: '1rem' }}>🟢 MATCHED (₹0)</span>
-                      ) : closing.stock_status === 'SHORT' ? (
-                        <span className="badge badge-danger" style={{ fontSize: '1rem' }}>🔴 SHORT ({closing.stock_variance} glasses / ₹{Math.abs(closing.stock_variance_value)})</span>
+              {/* Check Cards: Stock Check & Money Check */}
+              <div className="card" style={{ padding: 'var(--spacing-4)' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 'var(--spacing-3)' }}>Closing Reconciliations</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--spacing-3)' }}>
+                  {/* Stock Check */}
+                  <div style={{ padding: 'var(--spacing-3)', backgroundColor: 'var(--bg-main)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Stock Check</div>
+                    <div style={{ marginTop: 'var(--spacing-2)' }}>
+                      {closing ? (
+                        closing.stock_status === 'MATCHED' ? (
+                          <span className="status-pill status-pill-green">
+                            <Check size={14} strokeWidth={2} />
+                            <span>MATCHED (0 glasses)</span>
+                          </span>
+                        ) : closing.stock_status === 'SHORT' ? (
+                          <span className="status-pill status-pill-red">
+                            <AlertTriangle size={14} strokeWidth={2} />
+                            <span>SHORT ({closing.stock_variance} glasses / ₹{Math.abs(closing.stock_variance_value)})</span>
+                          </span>
+                        ) : (
+                          <span className="status-pill status-pill-amber">
+                            <AlertTriangle size={14} strokeWidth={2} />
+                            <span>EXTRA (+{closing.stock_variance} glasses / +₹{closing.stock_variance_value})</span>
+                          </span>
+                        )
                       ) : (
-                        <span className="badge badge-warning" style={{ fontSize: '1rem' }}>🟠 EXTRA (+{closing.stock_variance} glasses / +₹{closing.stock_variance_value})</span>
-                      )
-                    ) : (
-                      <span className="badge badge-warning">UNCLOSED</span>
-                    )}
-                  </div>
-                </div>
-
-                <div style={{ padding: 14, background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Money Check</div>
-                  <div style={{ marginTop: 6 }}>
-                    {closing ? (
-                      closing.money_status === 'MATCHED' ? (
-                        <span className="badge badge-success" style={{ fontSize: '1rem' }}>🟢 MATCHED (₹0)</span>
-                      ) : closing.money_status === 'SHORT' ? (
-                        <span className="badge badge-danger" style={{ fontSize: '1rem' }}>🔴 SHORT (₹{Math.abs(closing.money_difference)})</span>
-                      ) : (
-                        <span className="badge badge-warning" style={{ fontSize: '1rem' }}>🟠 EXTRA (+₹{closing.money_difference})</span>
-                      )
-                    ) : (
-                      <span className="badge badge-warning">UNCLOSED</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {closing && (
-                <div style={{ marginTop: 12, textAlign: 'right' }}>
-                  <button
-                    type="button"
-                    className="btn-action"
-                    style={{ background: '#fee2e2', color: '#991b1b', fontSize: '0.85rem', padding: '6px 12px' }}
-                    onClick={() => setShowReopenModal(true)}
-                  >
-                    🔓 Reopen Day
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* REAL-TIME ACTIVITY FEED */}
-            <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <div className="card-title" style={{ margin: 0 }}>REAL-TIME ACTIVITY FEED</div>
-                <span className="badge badge-success" style={{ fontSize: '0.75rem' }}>Live stream</span>
-              </div>
-
-              {dashboardData?.recentActivity?.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {dashboardData.recentActivity.map((act) => (
-                    <div
-                      key={`${act.type}-${act.id}`}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justify: 'space-between',
-                        padding: '10px 14px',
-                        background: '#f8fafc',
-                        borderRadius: 10,
-                        borderLeft: act.type === 'SALE' ? '4px solid #10b981' : act.type === 'RECEIPT' ? '4px solid #f59e0b' : '4px solid #6366f1'
-                      }}
-                    >
-                      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#64748b', minWidth: 65 }}>
-                          {formatTimeShort(act.created_at)}
-                        </span>
-                        <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#1e293b' }}>
-                          — {act.description}
-                        </span>
-                      </div>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#94a3b8' }}>
-                        {act.type}
-                      </span>
+                        <span className="status-pill status-pill-amber">UNCLOSED</span>
+                      )}
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No activity recorded today yet.</p>
-              )}
-            </div>
-          </>
-        )}
+                  </div>
 
-        {/* 2. STALL VIEW */}
-        {activeTab === 'stall' && (
-          <>
-            <h2 style={{ fontSize: '1.3rem', fontWeight: 900 }}>STALL MANAGEMENT</h2>
-            <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                <div>
-                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Stall 1 (Main Stall)</h3>
-                  <p style={{ fontSize: '0.85rem', color: '#64748b' }}>Status: Operating</p>
+                  {/* Money Check */}
+                  <div style={{ padding: 'var(--spacing-3)', backgroundColor: 'var(--bg-main)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Money Check</div>
+                    <div style={{ marginTop: 'var(--spacing-2)' }}>
+                      {closing ? (
+                        closing.money_status === 'MATCHED' ? (
+                          <span className="status-pill status-pill-green">
+                            <Check size={14} strokeWidth={2} />
+                            <span>MATCHED (₹0)</span>
+                          </span>
+                        ) : closing.money_status === 'SHORT' ? (
+                          <span className="status-pill status-pill-red">
+                            <AlertTriangle size={14} strokeWidth={2} />
+                            <span>SHORT (₹{Math.abs(closing.money_difference)})</span>
+                          </span>
+                        ) : (
+                          <span className="status-pill status-pill-amber">
+                            <AlertTriangle size={14} strokeWidth={2} />
+                            <span>EXTRA (+₹{closing.money_difference})</span>
+                          </span>
+                        )
+                      ) : (
+                        <span className="status-pill status-pill-amber">UNCLOSED</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                {stall1.isOnline ? (
-                  <span className="badge badge-success">🟢 Stall 1 Online</span>
-                ) : (
-                  <span className="badge badge-warning">🟠 Stall 1 Offline</span>
+
+                {closing && (
+                  <div style={{ marginTop: 'var(--spacing-4)', textAlign: 'right' }}>
+                    <button
+                      type="button"
+                      className="btn btn-quiet"
+                      style={{ color: 'var(--status-red)', fontSize: '0.875rem' }}
+                      onClick={() => setShowReopenModal(true)}
+                    >
+                      <Unlock size={16} strokeWidth={1.5} />
+                      <span>Reopen Day</span>
+                    </button>
+                  </div>
                 )}
               </div>
 
-              <div className="stock-grid" style={{ marginBottom: 16 }}>
-                <div className="stock-item">
-                  <div className="stock-label">Stock Received</div>
-                  <div className="stock-value">{metrics.totalStockReceived}</div>
+              {/* Real-Time Activity Feed */}
+              <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--spacing-3)' }}>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>Activity Stream</h3>
+                  <span className="status-pill status-pill-green">Live</span>
                 </div>
-                <div className="stock-item">
-                  <div className="stock-label">Sold</div>
-                  <div className="stock-value">{metrics.totalSold}</div>
-                </div>
-                <div className="stock-item">
-                  <div className="stock-label">Wastage</div>
-                  <div className="stock-value">{metrics.totalWastage}</div>
-                </div>
-                <div className="stock-item">
-                  <div className="stock-label">Expected Remaining</div>
-                  <div className="stock-value expected">{metrics.expectedRemaining}</div>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
 
-        {/* 3. STOCK VIEW */}
-        {activeTab === 'stock' && (
-          <>
-            <h2 style={{ fontSize: '1.3rem', fontWeight: 900 }}>STOCK DISPATCH & AUDIT</h2>
+                {dashboardData?.recentActivity?.length > 0 ? (
+                  <div>
+                    {dashboardData.recentActivity.map((act) => {
+                      let IconComponent = ShoppingCart;
+                      if (act.type === 'REVERSAL') IconComponent = RotateCcw;
+                      if (act.type === 'DISPATCH') IconComponent = Package;
+                      if (act.type === 'RECEIPT') IconComponent = Check;
+                      if (act.type === 'WASTAGE') IconComponent = Trash2;
+                      if (act.type === 'DAY_CLOSED') IconComponent = CalendarCheck;
 
-            {/* Quick Dispatch Card */}
-            <div className="card" style={{ background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)', border: '1px solid #86efac' }}>
-              <div className="card-title" style={{ color: '#166534' }}>Today's Dispatch to Stall 1</div>
-              {actionSuccess && <div className="badge badge-success" style={{ marginBottom: 10 }}>{actionSuccess}</div>}
-
-              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                <div style={{ flex: 1 }}>
-                  <label className="form-label" style={{ marginBottom: 4 }}>Quantity (Glasses)</label>
-                  <input
-                    type="number"
-                    className="form-input"
-                    value={dispatchQty}
-                    onChange={(e) => setDispatchQty(e.target.value)}
-                  />
-                </div>
-                <button
-                  className="btn-submit"
-                  style={{ width: 'auto', padding: '14px 24px', marginTop: 18 }}
-                  onClick={handleDispatch}
-                >
-                  DISPATCH
-                </button>
-              </div>
-            </div>
-
-            {/* Dispatch History Table */}
-            <div className="card">
-              <div className="card-title">Stock Dispatch Log</div>
-              <div className="table-container">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Dispatched Qty</th>
-                      <th>Received Qty</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stockLog?.dispatches?.length > 0 ? (
-                      stockLog.dispatches.map((d) => (
-                        <tr key={d.id}>
-                          <td>{formatTimeShort(d.created_at)}</td>
-                          <td style={{ fontWeight: 800 }}>{d.quantity}</td>
-                          <td style={{ fontWeight: 800 }}>{d.received_quantity !== null ? d.received_quantity : '—'}</td>
-                          <td>
-                            <span className={`badge ${d.status === 'RECEIVED' ? 'badge-success' : 'badge-warning'}`}>
-                              {d.status}
-                              {d.received_quantity !== null && d.received_quantity !== d.quantity && (
-                                ` (${d.received_quantity < d.quantity ? 'SHORT' : 'MORE'})`
-                              )}
-                            </span>
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan="4" style={{ textAlign: 'center', color: '#94a3b8' }}>No stock dispatches today.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* 4. SALES VIEW */}
-        {activeTab === 'sales' && (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h2 style={{ fontSize: '1.3rem', fontWeight: 900 }}>TODAY'S SALES LOG</h2>
-                <p style={{ fontSize: '0.85rem', color: '#64748b' }}>Reversals today: {metrics.reversalsToday || 0}</p>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Total Revenue</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 900, color: '#059669' }}>
-                  ₹{(salesLog?.totalRevenue || 0).toLocaleString()}
-                </div>
-              </div>
-            </div>
-
-            <div className="card">
-              <div className="table-container">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Time</th>
-                      <th>Qty</th>
-                      <th>Amount</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {salesLog?.sales?.length > 0 ? (
-                      salesLog.sales.map((sale) => (
-                        <tr key={sale.id} style={{ background: sale.quantity < 0 ? '#fee2e2' : 'inherit' }}>
-                          <td>#{sale.id}</td>
-                          <td>{formatTime(sale.created_at)}</td>
-                          <td style={{ fontWeight: 800, color: sale.quantity < 0 ? '#dc2626' : '#10b981' }}>
-                            {sale.quantity > 0 ? `+${sale.quantity}` : sale.quantity}
-                          </td>
-                          <td style={{ fontWeight: 800 }}>₹{sale.quantity * sale.selling_price}</td>
-                          <td>
-                            {sale.quantity > 0 && !salesLog.sales.some(s => s.reversal_of === sale.id) ? (
-                              <button
-                                type="button"
-                                className="btn-action"
-                                style={{ padding: '4px 8px', fontSize: '0.8rem', background: '#fee2e2', color: '#991b1b' }}
-                                onClick={() => setVoidSaleId(sale.id)}
-                              >
-                                Void
-                              </button>
-                            ) : sale.quantity < 0 ? (
-                              <span style={{ fontSize: '0.8rem', color: '#991b1b', fontWeight: 700 }}>
-                                Reversal (#{sale.reversal_of})
-                              </span>
-                            ) : (
-                              <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Voided</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan="5" style={{ textAlign: 'center', color: '#94a3b8' }}>No sales recorded today.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Void Sale Modal */}
-            {voidSaleId && (
-              <div className="modal-overlay" onClick={() => setVoidSaleId(null)}>
-                <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-                  <div className="modal-header">
-                    <h3 className="modal-title">VOID SALE #{voidSaleId}</h3>
-                    <button className="btn-close-modal" onClick={() => setVoidSaleId(null)}>&times;</button>
+                      return (
+                        <div key={`${act.type}-${act.id}`} className="activity-item">
+                          <div className="activity-icon">
+                            <IconComponent size={18} strokeWidth={1.5} />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '0.9375rem', fontWeight: 600 }}>{act.description}</div>
+                            <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                              {formatTime(act.created_at)} (IST)
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <form onSubmit={handleVoidSale}>
-                    <div className="form-group">
-                      <label className="form-label">Void Reason (Required)</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="e.g. Customer changed mind / accidental entry"
-                        value={voidReason}
-                        onChange={(e) => setVoidReason(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <button type="submit" className="btn-submit" style={{ background: '#dc2626' }}>
-                      CONFIRM VOID SALE
-                    </button>
-                  </form>
-                </div>
+                ) : (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>No activity recorded today yet.</p>
+                )}
               </div>
-            )}
-          </>
-        )}
+            </div>
+          )}
 
-        {/* 5. MONEY VIEW */}
-        {activeTab === 'money' && (
-          <>
-            <h2 style={{ fontSize: '1.3rem', fontWeight: 900 }}>MONEY & RECONCILIATION</h2>
-
+          {/* 2. STALL VIEW */}
+          {activeTab === 'stall' && (
             <div className="card">
-              <div className="card-title">Financial Breakdown</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f1f5f9' }}>
-                  <span style={{ fontWeight: 600, color: '#64748b' }}>Expected Revenue</span>
-                  <span style={{ fontWeight: 800, fontSize: '1.1rem' }}>₹{(moneyLog?.expectedRevenue || 0).toLocaleString()}</span>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: 'var(--spacing-3)' }}>Stall 1 Status</h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)' }}>
+                <div>Stock Received: <strong className="num">{metrics.totalStockReceived || 0}</strong> glasses</div>
+                <div>Sold Today: <strong className="num">{metrics.totalSold || 0}</strong> glasses</div>
+                <div>Wastage Today: <strong className="num">{metrics.totalWastage || 0}</strong> glasses</div>
+                <div>Expected Remaining: <strong className="num">{metrics.expectedRemaining || 0}</strong> glasses</div>
+              </div>
+            </div>
+          )}
+
+          {/* 3. STOCK VIEW */}
+          {activeTab === 'stock' && (
+            <div>
+              <div className="card" style={{ borderLeft: '4px solid var(--brand-accent)' }}>
+                <h3 style={{ fontSize: '1.125rem', fontWeight: 700, marginBottom: 'var(--spacing-3)' }}>Dispatch Stock to Stall 1</h3>
+                <form onSubmit={handleDispatch} style={{ display: 'flex', gap: 'var(--spacing-2)', alignItems: 'flex-end' }}>
+                  <div style={{ flex: 1 }}>
+                    <label className="form-label" htmlFor="dispatch-qty">Quantity (Glasses)</label>
+                    <input
+                      id="dispatch-qty"
+                      type="number"
+                      inputMode="numeric"
+                      className="input-large num"
+                      value={dispatchQty}
+                      onChange={(e) => setDispatchQty(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <button type="submit" className="btn btn-primary" style={{ minHeight: '52px' }}>
+                    Dispatch Stock
+                  </button>
+                </form>
+              </div>
+
+              {/* Stock Dispatches Log Cards / Table */}
+              <div className="card">
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 'var(--spacing-3)' }}>Today's Dispatches</h3>
+                {stockLog?.dispatches?.length > 0 ? (
+                  <div>
+                    {stockLog.dispatches.map((d) => (
+                      <div key={d.id} className="activity-item" style={{ justifyContent: 'space-between' }}>
+                        <div>
+                          <div style={{ fontWeight: 700 }}>Dispatch #{d.id} &bull; {d.quantity} glasses</div>
+                          <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>{formatTimeShort(d.created_at)}</div>
+                        </div>
+                        <span className={`status-pill ${d.status === 'RECEIVED' ? 'status-pill-green' : 'status-pill-amber'}`}>
+                          {d.status} {d.received_quantity !== null ? `(${d.received_quantity} recd)` : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>No stock dispatches today.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 4. SALES VIEW */}
+          {activeTab === 'sales' && (
+            <div>
+              <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--spacing-4)' }}>
+                  <h3 style={{ fontSize: '1.125rem', fontWeight: 800 }}>Sales Log</h3>
+                  <div className="num" style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--status-green)' }}>
+                    Total: ₹{(salesLog?.totalRevenue || 0).toLocaleString('en-IN')}
+                  </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f1f5f9' }}>
-                  <span style={{ fontWeight: 600, color: '#64748b' }}>Cash Collected</span>
-                  <span style={{ fontWeight: 800, fontSize: '1.1rem' }}>₹{(moneyLog?.cash || 0).toLocaleString()}</span>
-                </div>
+                {salesLog?.sales?.length > 0 ? (
+                  <div>
+                    {salesLog.sales.map((s) => (
+                      <div key={s.id} className="activity-item" style={{ justifyContent: 'space-between', opacity: s.quantity < 0 ? 0.7 : 1 }}>
+                        <div>
+                          <div style={{ fontWeight: 700 }}>
+                            {s.quantity > 0 ? `Sale #${s.id}` : `Reversal for #${s.reversal_of}`} &bull; ₹{s.quantity * s.selling_price}
+                          </div>
+                          <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>{formatTime(s.created_at)}</div>
+                        </div>
+                        <div>
+                          {s.quantity > 0 && !salesLog.sales.some(rev => rev.reversal_of === s.id) ? (
+                            <button
+                              type="button"
+                              className="btn btn-quiet"
+                              style={{ color: 'var(--status-red)', minHeight: '36px', height: '36px', fontSize: '0.8125rem' }}
+                              onClick={() => setVoidSaleId(s.id)}
+                            >
+                              Void
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                              {s.quantity < 0 ? 'Reversal' : 'Voided'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>No sales recorded today.</p>
+                )}
+              </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f1f5f9' }}>
-                  <span style={{ fontWeight: 600, color: '#64748b' }}>UPI Collected</span>
-                  <span style={{ fontWeight: 800, fontSize: '1.1rem' }}>₹{(moneyLog?.upi || 0).toLocaleString()}</span>
+              {/* Void Sale Dialog */}
+              {voidSaleId && (
+                <div className="modal-overlay" onClick={() => setVoidSaleId(null)}>
+                  <div className="bottom-sheet" onClick={(e) => e.stopPropagation()}>
+                    <h3 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: 'var(--spacing-3)' }}>Void Sale #{voidSaleId}</h3>
+                    <form onSubmit={handleVoidSale}>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="void-reason">Reason for Void</label>
+                        <input
+                          id="void-reason"
+                          type="text"
+                          className="input-large"
+                          placeholder="e.g. Accidental double entry"
+                          value={voidReason}
+                          onChange={(e) => setVoidReason(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-2)' }}>
+                        <button type="button" className="btn btn-secondary" onClick={() => setVoidSaleId(null)}>Cancel</button>
+                        <button type="submit" className="btn btn-primary" style={{ backgroundColor: 'var(--status-red)' }}>Confirm Void</button>
+                      </div>
+                    </form>
+                  </div>
                 </div>
+              )}
+            </div>
+          )}
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '2px solid #e2e8f0' }}>
-                  <span style={{ fontWeight: 800, fontSize: '1.1rem' }}>Total Received</span>
-                  <span style={{ fontWeight: 900, fontSize: '1.2rem', color: '#059669' }}>₹{(moneyLog?.totalReceived || 0).toLocaleString()}</span>
+          {/* 5. MONEY VIEW */}
+          {activeTab === 'money' && (
+            <div className="card">
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 800, marginBottom: 'var(--spacing-4)' }}>Financial Breakdown</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 'var(--spacing-2)', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <span>Expected Revenue</span>
+                  <strong className="num">₹{(moneyLog?.expectedRevenue || 0).toLocaleString('en-IN')}</strong>
                 </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0' }}>
-                  <span style={{ fontWeight: 800 }}>Money Difference</span>
-                  <span style={{ fontWeight: 900, fontSize: '1.2rem', color: moneyLog?.moneyDifference === 0 ? '#16a34a' : '#dc2626' }}>
-                    {moneyLog?.moneyDifference !== null ? `₹${moneyLog?.moneyDifference}` : '—'}
-                  </span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 'var(--spacing-2)', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <span>Cash Collected</span>
+                  <strong className="num">₹{(moneyLog?.cash || 0).toLocaleString('en-IN')}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 'var(--spacing-2)', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <span>UPI Collected</span>
+                  <strong className="num">₹{(moneyLog?.upi || 0).toLocaleString('en-IN')}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 'var(--spacing-2)', borderBottom: '2px solid var(--text-primary)' }}>
+                  <strong style={{ fontSize: '1.0625rem' }}>Total Received</strong>
+                  <strong className="num" style={{ fontSize: '1.125rem', color: 'var(--status-green)' }}>
+                    ₹{(moneyLog?.totalReceived || 0).toLocaleString('en-IN')}
+                  </strong>
                 </div>
               </div>
             </div>
-          </>
-        )}
+          )}
 
-        {/* 6. REPORTS VIEW */}
-        {activeTab === 'reports' && (
-          <>
-            <h2 style={{ fontSize: '1.3rem', fontWeight: 900 }}>DAILY FINANCIAL REPORT</h2>
-
-            <div className="card" style={{ background: '#f8fafc' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <div>
-                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Stall 1 P&L Report</h3>
-                  <p style={{ fontSize: '0.85rem', color: '#64748b' }}>Date: {reportsData?.date}</p>
+          {/* 6. REPORTS VIEW */}
+          {activeTab === 'reports' && (
+            <div className="card">
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 800, marginBottom: 'var(--spacing-4)' }}>Daily P&L Report</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 'var(--spacing-2)', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <span>Total Glasses Sold</span>
+                  <strong className="num">{reportsData?.totalGlassesSold || 0}</strong>
                 </div>
-                <span className="badge badge-success">MVP Single-Stall</span>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #e2e8f0' }}>
-                  <span style={{ fontWeight: 600 }}>Total Glasses Sold</span>
-                  <span style={{ fontWeight: 800, fontSize: '1.1rem' }}>{reportsData?.totalGlassesSold || 0}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 'var(--spacing-2)', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <span>Total Revenue (₹40/glass)</span>
+                  <strong className="num" style={{ color: 'var(--status-green)' }}>
+                    ₹{(reportsData?.totalRevenue || 0).toLocaleString('en-IN')}
+                  </strong>
                 </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #e2e8f0' }}>
-                  <span style={{ fontWeight: 600 }}>Total Revenue (₹{reportsData?.sellingPrice || 40}/glass)</span>
-                  <span style={{ fontWeight: 800, fontSize: '1.1rem', color: '#059669' }}>
-                    ₹{(reportsData?.totalRevenue || 0).toLocaleString()}
-                  </span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 'var(--spacing-2)', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <span>Direct Product Cost (₹20/glass)</span>
+                  <strong className="num" style={{ color: 'var(--status-red)' }}>
+                    - ₹{(reportsData?.totalProductCost || 0).toLocaleString('en-IN')}
+                  </strong>
                 </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #e2e8f0' }}>
-                  <span style={{ fontWeight: 600 }}>Direct Product Cost (₹{reportsData?.directCost || 20}/glass)</span>
-                  <span style={{ fontWeight: 800, fontSize: '1.1rem', color: '#dc2626' }}>
-                    - ₹{(reportsData?.totalProductCost || 0).toLocaleString()}
-                  </span>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0', background: '#ffffff', borderRadius: 8, paddingLeft: 12, paddingRight: 12, border: '2px solid #bbf7d0' }}>
-                  <span style={{ fontWeight: 900, fontSize: '1.1rem', color: '#065f46' }}>Estimated Operating Profit</span>
-                  <span style={{ fontWeight: 900, fontSize: '1.3rem', color: '#059669' }}>
-                    ₹{(reportsData?.estimatedOperatingProfit || 0).toLocaleString()}
-                  </span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 'var(--spacing-2)' }}>
+                  <strong style={{ fontSize: '1.125rem' }}>Operating Profit</strong>
+                  <strong className="num" style={{ fontSize: '1.25rem', color: 'var(--status-green)' }}>
+                    ₹{(reportsData?.estimatedOperatingProfit || 0).toLocaleString('en-IN')}
+                  </strong>
                 </div>
               </div>
             </div>
-          </>
-        )}
-      </main>
+          )}
+        </main>
+      </div>
+
+      {/* Mobile Bottom Tab Navigation Bar */}
+      <div className="mobile-nav-bar">
+        {NAV_ITEMS.map((item) => {
+          const IconComp = item.icon;
+          const isActive = activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              className={`mobile-nav-item ${isActive ? 'mobile-nav-item-active' : ''}`}
+              onClick={() => setActiveTab(item.id)}
+            >
+              <IconComp size={20} strokeWidth={1.5} />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </div>
 
       {/* Reopen Day Modal */}
       {showReopenModal && (
         <div className="modal-overlay" onClick={() => setShowReopenModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">REOPEN DAY</h3>
-              <button className="btn-close-modal" onClick={() => setShowReopenModal(false)}>&times;</button>
-            </div>
+          <div className="bottom-sheet" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: 'var(--spacing-3)' }}>Reopen Day</h3>
             <form onSubmit={handleReopenDay}>
               <div className="form-group">
-                <label className="form-label">Reopen Reason (Required)</label>
+                <label className="form-label" htmlFor="reopen-reason">Reason for Reopening</label>
                 <input
+                  id="reopen-reason"
                   type="text"
-                  className="form-input"
-                  placeholder="e.g. Closing count error correction"
+                  className="input-large"
+                  placeholder="e.g. Closing entry correction needed"
                   value={reopenReason}
                   onChange={(e) => setReopenReason(e.target.value)}
                   required
                 />
               </div>
-              <button type="submit" className="btn-submit" style={{ background: '#ea580c' }}>
-                REOPEN DAY
-              </button>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-2)' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowReopenModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" style={{ backgroundColor: 'var(--brand-accent)' }}>Reopen Day</button>
+              </div>
             </form>
           </div>
         </div>

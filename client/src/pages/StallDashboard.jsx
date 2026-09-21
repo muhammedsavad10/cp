@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Wifi, WifiOff, Package, Check, RotateCcw, Trash2, CalendarCheck, AlertTriangle, RefreshCw } from 'lucide-react';
 import { api } from '../api';
 import { useWebSocket } from '../useWebSocket';
 import Navbar from '../components/Navbar';
@@ -10,14 +11,44 @@ export default function StallDashboard({ onLogout }) {
   const [loading, setLoading] = useState(true);
   const [selling, setSelling] = useState(false);
   const [undoing, setUndoing] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
+  const [showCheckAnim, setShowCheckAnim] = useState(false);
   const [showWastageModal, setShowWastageModal] = useState(false);
   const [showCloseDayModal, setShowCloseDayModal] = useState(false);
-  const [customReceiptQty, setCustomReceiptQty] = useState('');
   const [selectedDispatch, setSelectedDispatch] = useState(null);
+  const [customReceiptQty, setCustomReceiptQty] = useState('');
+  const [lastSaleTime, setLastSaleTime] = useState(null);
+  const [undoTimeLeft, setUndoTimeLeft] = useState(0);
   const [error, setError] = useState('');
 
-  const toastTimerRef = useRef(null);
+  const undoTimerRef = useRef(null);
+  const wakeLockRef = useRef(null);
+
+  // Screen Wake Lock API
+  const requestWakeLock = useCallback(async () => {
+    if ('wakeLock' in navigator) {
+      try {
+        wakeLockRef.current = await navigator.wakeLock.request('screen');
+      } catch (e) {
+        // Fail silently if wake lock is unsupported or fails
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    requestWakeLock();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+      }
+    };
+  }, [requestWakeLock]);
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -25,7 +56,7 @@ export default function StallDashboard({ onLogout }) {
       setDashboard(data);
       setError('');
     } catch (err) {
-      setError(err.message || 'Failed to load stall data');
+      setError('Not saved. Tap again, or note it on paper.');
     } finally {
       setLoading(false);
     }
@@ -45,9 +76,24 @@ export default function StallDashboard({ onLogout }) {
     return () => clearInterval(interval);
   }, [fetchDashboard]);
 
+  // Undo Timer countdown (120s window)
+  useEffect(() => {
+    if (undoTimeLeft > 0) {
+      undoTimerRef.current = setInterval(() => {
+        setUndoTimeLeft(prev => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(undoTimerRef.current);
+  }, [undoTimeLeft]);
+
   const handleSellOne = async () => {
-    if (selling) return;
+    if (selling || dashboard?.closingSubmitted) return;
     setSelling(true);
+
+    // Haptic feedback (30ms vibration)
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try { navigator.vibrate(30); } catch (e) {}
+    }
 
     const idempotency_key = (typeof crypto !== 'undefined' && crypto.randomUUID)
       ? crypto.randomUUID()
@@ -55,36 +101,33 @@ export default function StallDashboard({ onLogout }) {
 
     try {
       const res = await api.sellOne(idempotency_key);
-      setDashboard(prev => prev ? {
-        ...prev,
-        soldToday: res.soldToday
-      } : prev);
+      setDashboard(prev => prev ? { ...prev, soldToday: res.soldToday } : prev);
+      setShowCheckAnim(true);
+      setTimeout(() => setShowCheckAnim(false), 800);
 
-      setToastMessage(res.warning ? `✓ Sale Recorded (${res.warning})` : '✓ Sale Recorded (+1)');
-
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-      toastTimerRef.current = setTimeout(() => setToastMessage(''), 2000);
-
+      const now = new Date();
+      setLastSaleTime(now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      setUndoTimeLeft(120);
+      setError('');
       fetchDashboard();
     } catch (err) {
-      setError(err.message || 'Failed to record sale');
+      setError('Not saved. Tap again, or note it on paper.');
     } finally {
-      setTimeout(() => setSelling(false), 300);
+      setTimeout(() => setSelling(false), 200);
     }
   };
 
   const handleUndoLast = async () => {
-    if (undoing) return;
+    if (undoing || undoTimeLeft <= 0 || dashboard?.closingSubmitted) return;
     setUndoing(true);
 
     try {
       await api.undoLastSale();
-      setToastMessage('↺ Last Sale Undone');
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-      toastTimerRef.current = setTimeout(() => setToastMessage(''), 2000);
+      setUndoTimeLeft(0);
+      setError('');
       fetchDashboard();
     } catch (err) {
-      setError(err.message || 'Failed to undo sale');
+      setError(err.message || 'Failed to undo last sale');
     } finally {
       setUndoing(false);
     }
@@ -102,17 +145,12 @@ export default function StallDashboard({ onLogout }) {
     }
   };
 
-  const formatDate = () => {
-    const options = { weekday: 'long', day: 'numeric', month: 'long' };
-    return new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', ...options });
-  };
-
   if (loading) {
     return (
-      <div className="app-container">
+      <div className="app-shell">
         <Navbar onLogout={onLogout} />
-        <div className="main-content" style={{ textAlign: 'center', paddingTop: 40 }}>
-          <p style={{ fontWeight: 700, color: 'var(--text-secondary)' }}>Loading Stall 1 Dashboard...</p>
+        <div className="worker-container" style={{ justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
+          <p style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Loading Stall Data...</p>
         </div>
       </div>
     );
@@ -121,70 +159,89 @@ export default function StallDashboard({ onLogout }) {
   const pendingDispatches = dashboard?.pendingDispatches || [];
 
   return (
-    <div className="app-container">
+    <div className="app-shell">
       <Navbar onLogout={onLogout} />
 
-      <main className="main-content">
-        {/* Header Title & Connection Badge */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+      <div className="worker-container" style={{ padding: 'var(--spacing-4)' }}>
+        {/* Top Header Bar: Stall Name & Connection Status Pill */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--spacing-3)' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h1 style={{ fontSize: '1.4rem', fontWeight: 900, color: '#064e3b' }}>
-                {dashboard?.stall?.name || 'PAYASAM STALL 1'}
-              </h1>
-              <span className={`badge ${isConnected ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: '0.75rem', padding: '2px 8px' }}>
-                {isConnected ? '🟢 Live' : '🟠 Offline'}
-              </span>
-            </div>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-              Today &bull; {formatDate()}
-            </p>
+            <h1 style={{ fontSize: '1.25rem', fontWeight: 800 }}>
+              {dashboard?.stall?.name || 'Stall 1'}
+            </h1>
+            <span style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+              {dashboard?.product?.name || 'Butter Fruit Payasam'} &bull; ₹40
+            </span>
           </div>
-          {dashboard?.closingSubmitted && (
-            <span className="badge badge-success">Day Closed</span>
-          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)' }}>
+            <span className={`status-pill ${isConnected ? 'status-pill-green' : 'status-pill-red'}`}>
+              {isConnected ? <Wifi size={14} strokeWidth={2} /> : <WifiOff size={14} strokeWidth={2} />}
+              <span>{isConnected ? 'Live' : 'Offline'}</span>
+            </span>
+
+            {dashboard?.closingSubmitted && (
+              <span className="status-pill status-pill-amber">Closed</span>
+            )}
+          </div>
         </div>
 
+        {/* State 6: Persistent Plain Banner for Failed Sale / Offline */}
         {error && (
-          <div className="badge badge-danger" style={{ width: '100%', padding: 10 }}>
-            {error}
+          <div className="card" style={{ borderLeft: '4px solid var(--status-red)', backgroundColor: 'var(--status-red-bg)', color: 'var(--status-red)', padding: 'var(--spacing-3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--spacing-2)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', fontSize: '0.9375rem', fontWeight: 600 }}>
+              <AlertTriangle size={20} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+              <span>{error}</span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-quiet"
+              style={{ minHeight: '36px', height: '36px', padding: '0 8px', fontSize: '0.8125rem', color: 'var(--status-red)' }}
+              onClick={fetchDashboard}
+            >
+              <RefreshCw size={14} strokeWidth={1.5} />
+              <span>Retry</span>
+            </button>
           </div>
         )}
 
-        {/* Stock Received Dispatch Banners */}
+        {/* State 1: Pending Stock Cards */}
         {pendingDispatches.map((dispatch) => (
-          <div key={dispatch.id} className="dispatch-banner">
-            <div>
-              <div className="dispatch-title">📦 STOCK DISPATCHED</div>
-              <div style={{ fontSize: '1.2rem', fontWeight: 800, marginTop: 2 }}>
-                {dispatch.quantity} glasses
-              </div>
-              <div style={{ fontSize: '0.8rem', color: '#9a3412' }}>
-                Dispatched by {dispatch.dispatched_by_name || 'Admin'}
-              </div>
+          <div key={dispatch.id} className="card" style={{ borderLeft: '4px solid var(--brand-accent)', backgroundColor: 'var(--status-amber-bg)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', marginBottom: 'var(--spacing-2)' }}>
+              <Package size={20} strokeWidth={1.5} style={{ color: 'var(--brand-accent)' }} />
+              <strong style={{ fontSize: '1rem' }}>Stock Dispatched</strong>
             </div>
 
-            <div style={{ display: 'flex', gap: 8, flexDirection: 'column' }}>
+            <p style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: 'var(--spacing-3)' }} className="num">
+              Stock sent: {dispatch.quantity} glasses
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)' }}>
               <button
-                className="btn-confirm-receipt"
+                type="button"
+                className="btn btn-primary"
                 onClick={() => handleConfirmReceipt(dispatch, dispatch.quantity)}
               >
-                CONFIRM RECEIPT ({dispatch.quantity})
+                <Check size={18} strokeWidth={1.5} />
+                <span>Confirm Receipt</span>
               </button>
 
               {selectedDispatch?.id === dispatch.id ? (
-                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                <div style={{ display: 'flex', gap: 'var(--spacing-2)', marginTop: 'var(--spacing-2)' }}>
                   <input
                     type="number"
-                    className="form-input"
-                    placeholder="Enter counted qty"
+                    inputMode="numeric"
+                    className="input-large num"
+                    style={{ minHeight: '44px', fontSize: '1rem' }}
+                    placeholder="Enter count"
                     value={customReceiptQty}
                     onChange={(e) => setCustomReceiptQty(e.target.value)}
-                    style={{ padding: '8px', fontSize: '0.9rem' }}
                   />
                   <button
-                    className="btn-action"
-                    style={{ background: '#ea580c', color: 'white', padding: '8px 12px', fontSize: '0.9rem' }}
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ minHeight: '44px' }}
                     onClick={() => handleConfirmReceipt(dispatch, customReceiptQty)}
                   >
                     Save
@@ -193,7 +250,8 @@ export default function StallDashboard({ onLogout }) {
               ) : (
                 <button
                   type="button"
-                  style={{ background: 'none', border: 'none', color: '#c2410c', textDecoration: 'underline', fontSize: '0.85rem', cursor: 'pointer', fontWeight: 700 }}
+                  className="btn btn-quiet"
+                  style={{ fontSize: '0.875rem' }}
                   onClick={() => { setSelectedDispatch(dispatch); setCustomReceiptQty(String(dispatch.quantity)); }}
                 >
                   Count is different?
@@ -203,77 +261,95 @@ export default function StallDashboard({ onLogout }) {
           </div>
         ))}
 
-        {/* Product Card & MASSIVE SELL 1 Button */}
-        <div className="card sell-product-card">
-          <div className="product-name">
-            {dashboard?.product?.name || 'BUTTER FRUIT PAYASAM'}
-          </div>
-          <div className="sold-today-count">
-            Sold Today: <span className="sold-today-number">{dashboard?.soldToday || 0}</span> glasses
-          </div>
-
-          <button
-            className="btn-sell-1"
-            onClick={handleSellOne}
-            disabled={selling || dashboard?.closingSubmitted}
-          >
-            <span>SELL 1</span>
-            <span className="btn-sell-subtext">₹40 / glass</span>
-          </button>
-
-          {toastMessage && (
-            <div className="sale-toast">
-              {toastMessage}
+        {/* State 5 / State 2: Worker Selling Screen */}
+        {dashboard?.closingSubmitted ? (
+          /* Closed Day View for Stall Worker */
+          <div className="card" style={{ textAlign: 'center', padding: 'var(--spacing-6) var(--spacing-4)', marginTop: 'var(--spacing-4)' }}>
+            <div style={{ width: 56, height: 56, borderRadius: 'var(--radius-full)', backgroundColor: 'var(--status-green-bg)', color: 'var(--status-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto var(--spacing-3)' }}>
+              <CalendarCheck size={32} strokeWidth={1.5} />
             </div>
-          )}
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: 'var(--spacing-2)' }}>Day Closed</h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9375rem' }}>
+              Total sold today: <strong className="num">{dashboard?.soldToday || 0}</strong> glasses
+            </p>
+          </div>
+        ) : (
+          /* Active Selling View */
+          <div>
+            {/* Today's Sold Count Hero */}
+            <div className="hero-sold-container">
+              <div className="hero-sold-label">Glasses Sold Today</div>
+              <div className="hero-number num">{dashboard?.soldToday || 0}</div>
+            </div>
 
-          <div style={{ marginTop: 12 }}>
+            {/* GIANT FULL-WIDTH SELL 1 BUTTON (~40% Viewport Height) */}
             <button
               type="button"
-              className="btn-action"
-              style={{ background: '#f1f5f9', color: '#475569', fontSize: '0.9rem', width: '100%', padding: '10px' }}
-              onClick={handleUndoLast}
-              disabled={undoing || dashboard?.closingSubmitted}
+              className="btn-giant-sell"
+              onClick={handleSellOne}
+              disabled={selling}
             >
-              ↺ UNDO LAST SALE (120s)
+              {showCheckAnim ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Check size={48} strokeWidth={2} />
+                  <span className="btn-giant-sell-label">RECORDED!</span>
+                </div>
+              ) : (
+                <>
+                  <span className="btn-giant-sell-label">SELL 1</span>
+                  <span className="btn-giant-sell-subtext">₹40 per glass</span>
+                </>
+              )}
             </button>
-          </div>
-        </div>
 
-        {/* Stock Summary Card (Sold and Received ONLY - No Expected Left) */}
-        <div className="card">
-          <div className="card-title">Today's Stock</div>
-          <div className="stock-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
-            <div className="stock-item">
-              <div className="stock-label">Received</div>
-              <div className="stock-value">{dashboard?.stockReceived || 0}</div>
+            {/* Stat Row: Received count & Last sale time */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 var(--spacing-2)', marginBottom: 'var(--spacing-3)', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+              <span>Received: <strong className="num">{dashboard?.stockReceived || 0}</strong></span>
+              <span>{lastSaleTime ? `Last sale ${lastSaleTime}` : 'No sales yet'}</span>
             </div>
-            <div className="stock-item">
-              <div className="stock-label">Sold</div>
-              <div className="stock-value">{dashboard?.soldToday || 0}</div>
+
+            {/* 2-Minute Shrinking Countdown for Undo Last Sale */}
+            {undoTimeLeft > 0 && (
+              <div className="undo-container">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ width: '100%', minHeight: '44px', fontSize: '0.9375rem' }}
+                    onClick={handleUndoLast}
+                    disabled={undoing}
+                  >
+                    <RotateCcw size={16} strokeWidth={1.5} />
+                    <span>Undo Last Sale ({undoTimeLeft}s)</span>
+                  </button>
+                </div>
+                <div className="undo-progress-bar" style={{ width: `${(undoTimeLeft / 120) * 100}%` }} />
+              </div>
+            )}
+
+            {/* Quiet Secondary Action Buttons at Bottom */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-3)', marginTop: 'var(--spacing-6)' }}>
+              <button
+                type="button"
+                className="btn btn-quiet"
+                onClick={() => setShowWastageModal(true)}
+              >
+                <Trash2 size={18} strokeWidth={1.5} />
+                <span>Wastage</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-quiet"
+                onClick={() => setShowCloseDayModal(true)}
+              >
+                <CalendarCheck size={18} strokeWidth={1.5} />
+                <span>Close Day</span>
+              </button>
             </div>
           </div>
-        </div>
-
-        {/* Action Buttons: Wastage & Close Day */}
-        <div className="actions-row">
-          <button
-            className="btn-action btn-wastage"
-            onClick={() => setShowWastageModal(true)}
-            disabled={dashboard?.closingSubmitted}
-          >
-            <span>🗑️ WASTAGE</span>
-          </button>
-
-          <button
-            className="btn-action btn-close-day"
-            onClick={() => setShowCloseDayModal(true)}
-            disabled={dashboard?.closingSubmitted}
-          >
-            <span>📊 CLOSE DAY</span>
-          </button>
-        </div>
-      </main>
+        )}
+      </div>
 
       {/* Modals */}
       <WastageModal

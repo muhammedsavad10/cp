@@ -8,12 +8,7 @@ const fs = require('fs');
 // Set test environment
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test_secret_key_1234567890';
-process.env.DATA_DIR = path.join(__dirname, '../data_test');
-
-// Ensure clean test DB directory
-if (fs.existsSync(process.env.DATA_DIR)) {
-  fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
-}
+process.env.DATA_DIR = path.join(__dirname, `../data_test_${Date.now()}`);
 
 const server = require('../server/index');
 const { get, all, run, getISTBusinessDate, getUTCTimestamp } = require('../server/db');

@@ -1,0 +1,9 @@
+{
+  "short_name": "Payasam",
+  "name": "Cold Payasam Stall Management",
+  "start_url": "/",
+  "background_color": "#FBF9F5",
+  "theme_color": "#FBF9F5",
+  "display": "standalone",
+  "orientation": "portrait"
+}
