@@ -393,6 +393,7 @@ export default function StallDashboard({ onLogout }) {
         isOpen={showCloseDayModal}
         onClose={() => setShowCloseDayModal(false)}
         onSuccess={fetchDashboard}
+        soldToday={dashboard?.soldToday}
         computedRemaining={dashboard?.computedRemaining}
       />
     </div>
