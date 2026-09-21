@@ -29,13 +29,13 @@ router.get('/dashboard', async (req, res) => {
     // Sales metrics (reversals net out)
     const salesRow = await get(
       `SELECT COALESCE(SUM(quantity), 0) as total_sold, 
-              COALESCE(SUM(quantity * selling_price), 0) as total_revenue 
-       FROM sales 
-       WHERE business_date = ?`,
+              COALESCE(SUM(selling_price), 0) as total_revenue 
+       FROM sales WHERE business_date = ?`,
       [today]
     );
     const totalSold = salesRow ? salesRow.total_sold : 0;
     const totalRevenue = salesRow ? salesRow.total_revenue : 0;
+    const profit = totalRevenue - (totalSold * 20.0);
 
     // Count of reversals today
     const reversalRow = await get(
@@ -174,6 +174,7 @@ router.get('/dashboard', async (req, res) => {
       metrics: {
         totalSold,
         totalRevenue,
+        profit,
         reversalsToday,
         totalStockReceived,
         totalWastage,
@@ -194,6 +195,7 @@ router.get('/dashboard', async (req, res) => {
         wastage: totalWastage,
         expectedRemaining,
         revenue: totalRevenue,
+        profit,
         lastSaleTime: lastSale ? lastSale.created_at : null,
         isOnline: connStatus.isOnline,
         lastSeen: connStatus.lastSeen,
@@ -393,7 +395,7 @@ router.get('/sales', async (req, res) => {
     );
 
     const revenueRow = await get(
-      `SELECT COALESCE(SUM(quantity * selling_price), 0) as total_revenue, 
+      `SELECT COALESCE(SUM(selling_price), 0) as total_revenue, 
               COALESCE(SUM(quantity), 0) as total_sold 
        FROM sales WHERE business_date = ?`,
       [today]
@@ -473,7 +475,7 @@ router.get('/money', async (req, res) => {
     const today = getISTBusinessDate();
 
     const revenueRow = await get(
-      `SELECT COALESCE(SUM(quantity * selling_price), 0) as total FROM sales WHERE business_date = ?`,
+      `SELECT COALESCE(SUM(selling_price), 0) as total FROM sales WHERE business_date = ?`,
       [today]
     );
     const expectedRevenue = revenueRow ? revenueRow.total : 0;

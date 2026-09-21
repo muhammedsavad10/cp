@@ -437,6 +437,56 @@ test('15. T1.6-3: Stock Cap (sell/wastage/parcel blocked with 409 STOCK_FINISHED
   assert.equal(sell4Res.body.error, 'Item finished');
 });
 
+test('16. T1.6-4: Parcel Sales (+3, ₹120), parcel undo (-3, -₹120), and revenue calculation', async () => {
+  const bcrypt = require('bcryptjs');
+  const passHash = await bcrypt.hash('pass123', 10);
+  await run(`INSERT INTO stalls (id, name, active) VALUES (6, 'Stall 6', 1)`);
+  await run(
+    `INSERT INTO users (name, email, password, role, stall_id) VALUES ('Stall 6 Worker', 'stall6@test.com', ?, 'STALL_USER', 6)`,
+    [passHash]
+  );
+  const s6Res = await request('POST', '/api/auth/login', {}, { email: 'stall6@test.com', password: 'pass123' });
+  const s6Token = s6Res.body.token;
+
+  await request('POST', '/api/stall/start-day', { Authorization: `Bearer ${s6Token}` });
+
+  // Insert 20 glasses stock for Stall 6
+  const today6 = getISTBusinessDate();
+  const utc6 = getUTCTimestamp();
+  await run(
+    `INSERT INTO stock_dispatches (stall_id, product_id, quantity, dispatched_by, created_at, received_at, received_by, received_quantity, received_business_date, status)
+     VALUES (6, 1, 20, 1, ?, ?, 2, 20, ?, 'RECEIVED')`,
+    [utc6, utc6, today6]
+  );
+
+  // 1. Single glass sale (+1, ₹40)
+  await request('POST', '/api/stall/sell', { Authorization: `Bearer ${s6Token}` }, { idempotency_key: `s6_single_${Date.now()}` });
+
+  // 2. Parcel sale (+3, ₹120)
+  const pRes = await request('POST', '/api/stall/sell-parcel', { Authorization: `Bearer ${s6Token}` }, { idempotency_key: `s6_parcel_${Date.now()}` });
+  assert.equal(pRes.status, 200);
+  assert.equal(pRes.body.soldToday, 4); // 1 single + 3 parcel = 4 sold
+
+  // Check sales record in DB
+  const parcelRow = await get(`SELECT * FROM sales WHERE stall_id = 6 AND quantity = 3`);
+  assert.ok(parcelRow);
+  assert.equal(parcelRow.selling_price, 120);
+
+  // 3. Undo last sale (should undo the parcel sale of 3 glasses at once)
+  const undoRes = await request('POST', '/api/stall/undo-last', { Authorization: `Bearer ${s6Token}` });
+  assert.equal(undoRes.status, 200);
+
+  // Verify DB reversal row: quantity = -3, selling_price = -120
+  const revRow = await get(`SELECT * FROM sales WHERE stall_id = 6 AND reversal_of = ?`, [parcelRow.id]);
+  assert.ok(revRow);
+  assert.equal(revRow.quantity, -3);
+  assert.equal(revRow.selling_price, -120);
+
+  // Verify dashboard sold count is back to 1
+  const dash = await request('GET', '/api/stall/dashboard', { Authorization: `Bearer ${s6Token}` });
+  assert.equal(dash.body.soldToday, 1);
+});
+
 after(async () => {
   await new Promise(resolve => server.close(resolve));
 });
