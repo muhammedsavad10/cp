@@ -323,6 +323,46 @@ test('13. T1.5-1: Start Day enforcement (sell before start-day returns 409 DAY_N
   assert.equal(sellRes2.status, 200);
 });
 
+test('14. T1.6-2: Start Day state machine (close -> reload shows Day Closed; admin reopen -> reload shows Selling screen)', async () => {
+  const bcrypt = require('bcryptjs');
+  const passHash = await bcrypt.hash('pass123', 10);
+  await run(`INSERT INTO stalls (id, name, active) VALUES (4, 'Stall 4', 1)`);
+  await run(
+    `INSERT INTO users (name, email, password, role, stall_id) VALUES ('Stall 4 Worker', 'stall4@test.com', ?, 'STALL_USER', 4)`,
+    [passHash]
+  );
+  const s4Res = await request('POST', '/api/auth/login', {}, { email: 'stall4@test.com', password: 'pass123' });
+  const s4Token = s4Res.body.token;
+
+  // 1. Initial dashboard -> dayStarted = false
+  const dash1 = await request('GET', '/api/stall/dashboard', { Authorization: `Bearer ${s4Token}` });
+  assert.equal(dash1.body.dayStarted, false);
+  assert.equal(dash1.body.closingSubmitted, false);
+
+  // 2. Start Day -> dayStarted = true
+  await request('POST', '/api/stall/start-day', { Authorization: `Bearer ${s4Token}` });
+  const dash2 = await request('GET', '/api/stall/dashboard', { Authorization: `Bearer ${s4Token}` });
+  assert.equal(dash2.body.dayStarted, true);
+
+  // 3. Make a sale and Close Day -> dayStarted = true, closingSubmitted = true
+  await request('POST', '/api/stall/sell', { Authorization: `Bearer ${s4Token}` }, { idempotency_key: `s4_sale_${Date.now()}` });
+  const closeRes = await request('POST', '/api/stall/close-day', { Authorization: `Bearer ${s4Token}` }, { cash_received: 40, upi_received: 0 });
+  assert.equal(closeRes.status, 200);
+
+  const dash3 = await request('GET', '/api/stall/dashboard', { Authorization: `Bearer ${s4Token}` });
+  assert.equal(dash3.body.dayStarted, true);
+  assert.equal(dash3.body.closingSubmitted, true);
+
+  // 4. Admin Reopen Day -> dayStarted = true, closingSubmitted = false (goes straight to selling screen)
+  const today = getISTBusinessDate();
+  const reopenRes = await request('POST', '/api/admin/reopen-day', { Authorization: `Bearer ${adminToken}` }, { stall_id: 4, business_date: today, reason: 'Test reopen' });
+  assert.equal(reopenRes.status, 200);
+
+  const dash4 = await request('GET', '/api/stall/dashboard', { Authorization: `Bearer ${s4Token}` });
+  assert.equal(dash4.body.dayStarted, true);
+  assert.equal(dash4.body.closingSubmitted, false);
+});
+
 after(async () => {
   await new Promise(resolve => server.close(resolve));
 });

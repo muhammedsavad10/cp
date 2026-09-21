@@ -43,11 +43,11 @@ router.get('/dashboard', async (req, res) => {
     const product = await get('SELECT * FROM products WHERE id = 1');
 
     // Session check for dayStarted
-    const activeSession = await get(
-      `SELECT * FROM stall_sessions WHERE stall_id = ? AND business_date = ? AND status = 'ACTIVE'`,
+    const latestSession = await get(
+      `SELECT * FROM stall_sessions WHERE stall_id = ? AND business_date = ? ORDER BY id DESC LIMIT 1`,
       [stallId, today]
     );
-    const dayStarted = !!activeSession;
+    const dayStarted = !!latestSession;
 
     // Received stock today
     const receivedRow = await get(
