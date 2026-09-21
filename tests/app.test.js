@@ -68,6 +68,16 @@ before(async () => {
   const stall1Res = await request('POST', '/api/auth/login', {}, { email: 'stall1@test.com', password: 'stall123' });
   stall1Token = stall1Res.body.token;
 
+  // Start Day and insert 100 confirmed received stock for Stall 1
+  await request('POST', '/api/stall/start-day', { Authorization: `Bearer ${stall1Token}` });
+  const today = getISTBusinessDate();
+  const utcTimestamp = getUTCTimestamp();
+  await run(
+    `INSERT INTO stock_dispatches (stall_id, product_id, quantity, dispatched_by, created_at, received_at, received_by, received_quantity, received_business_date, status)
+     VALUES (1, 1, 100, 1, ?, ?, 2, 100, ?, 'RECEIVED')`,
+    [utcTimestamp, utcTimestamp, today]
+  );
+
   // Create Stall 2 user
   await run(
     `INSERT INTO users (name, email, password, role, stall_id) VALUES ('Stall 2 Worker', 'stall2@test.com', ?, 'STALL_USER', 2)`,
@@ -312,11 +322,20 @@ test('13. T1.5-1: Start Day enforcement (sell before start-day returns 409 DAY_N
   // Sell attempt before Start Day -> 409 DAY_NOT_STARTED
   const sellRes = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall3Token}` }, { idempotency_key: `s3_key_${Date.now()}` });
   assert.equal(sellRes.status, 409);
-  assert.equal(sellRes.body.error, 'DAY_NOT_STARTED');
+  assert.equal(sellRes.body.code, 'DAY_NOT_STARTED');
 
   // Start Day -> 200 OK
   const startRes = await request('POST', '/api/stall/start-day', { Authorization: `Bearer ${stall3Token}` });
   assert.equal(startRes.status, 200);
+
+  // Dispatch & confirm stock for Stall 3
+  const today3 = getISTBusinessDate();
+  const utc3 = getUTCTimestamp();
+  await run(
+    `INSERT INTO stock_dispatches (stall_id, product_id, quantity, dispatched_by, created_at, received_at, received_by, received_quantity, received_business_date, status)
+     VALUES (3, 1, 50, 1, ?, ?, 2, 50, ?, 'RECEIVED')`,
+    [utc3, utc3, today3]
+  );
 
   // Sell attempt after Start Day -> 200 OK
   const sellRes2 = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall3Token}` }, { idempotency_key: `s3_key_${Date.now()}` });
@@ -341,6 +360,13 @@ test('14. T1.6-2: Start Day state machine (close -> reload shows Day Closed; adm
 
   // 2. Start Day -> dayStarted = true
   await request('POST', '/api/stall/start-day', { Authorization: `Bearer ${s4Token}` });
+  const today4 = getISTBusinessDate();
+  const utc4 = getUTCTimestamp();
+  await run(
+    `INSERT INTO stock_dispatches (stall_id, product_id, quantity, dispatched_by, created_at, received_at, received_by, received_quantity, received_business_date, status)
+     VALUES (4, 1, 50, 1, ?, ?, 2, 50, ?, 'RECEIVED')`,
+    [utc4, utc4, today4]
+  );
   const dash2 = await request('GET', '/api/stall/dashboard', { Authorization: `Bearer ${s4Token}` });
   assert.equal(dash2.body.dayStarted, true);
 
@@ -361,6 +387,54 @@ test('14. T1.6-2: Start Day state machine (close -> reload shows Day Closed; adm
   const dash4 = await request('GET', '/api/stall/dashboard', { Authorization: `Bearer ${s4Token}` });
   assert.equal(dash4.body.dayStarted, true);
   assert.equal(dash4.body.closingSubmitted, false);
+});
+
+test('15. T1.6-3: Stock Cap (sell/wastage/parcel blocked with 409 STOCK_FINISHED when stock exhausted)', async () => {
+  const bcrypt = require('bcryptjs');
+  const passHash = await bcrypt.hash('pass123', 10);
+  await run(`INSERT INTO stalls (id, name, active) VALUES (5, 'Stall 5', 1)`);
+  await run(
+    `INSERT INTO users (name, email, password, role, stall_id) VALUES ('Stall 5 Worker', 'stall5@test.com', ?, 'STALL_USER', 5)`,
+    [passHash]
+  );
+  const s5Res = await request('POST', '/api/auth/login', {}, { email: 'stall5@test.com', password: 'pass123' });
+  const s5Token = s5Res.body.token;
+
+  await request('POST', '/api/stall/start-day', { Authorization: `Bearer ${s5Token}` });
+
+  // Insert 3 glasses of confirmed stock for Stall 5
+  const today5 = getISTBusinessDate();
+  const utc5 = getUTCTimestamp();
+  await run(
+    `INSERT INTO stock_dispatches (stall_id, product_id, quantity, dispatched_by, created_at, received_at, received_by, received_quantity, received_business_date, status)
+     VALUES (5, 1, 3, 1, ?, ?, 2, 3, ?, 'RECEIVED')`,
+    [utc5, utc5, today5]
+  );
+
+  // Sell 2 glasses (remaining = 1)
+  await request('POST', '/api/stall/sell', { Authorization: `Bearer ${s5Token}` }, { idempotency_key: `s5_sale1_${Date.now()}` });
+  await request('POST', '/api/stall/sell', { Authorization: `Bearer ${s5Token}` }, { idempotency_key: `s5_sale2_${Date.now()}` });
+
+  // Parcel sale requires 3 glasses -> blocked with 409 STOCK_FINISHED (since remaining = 1 < 3)
+  const parcelCapRes = await request('POST', '/api/stall/sell-parcel', { Authorization: `Bearer ${s5Token}` }, { idempotency_key: `s5_parcel_${Date.now()}` });
+  assert.equal(parcelCapRes.status, 409);
+  assert.equal(parcelCapRes.body.code, 'STOCK_FINISHED');
+  assert.equal(parcelCapRes.body.error, 'Item finished');
+
+  // Wastage of 2 glasses -> blocked (since remaining = 1 < 2)
+  const wastageCapRes = await request('POST', '/api/stall/wastage', { Authorization: `Bearer ${s5Token}` }, { quantity: 2, reason: 'Spoiled' });
+  assert.equal(wastageCapRes.status, 409);
+  assert.equal(wastageCapRes.body.code, 'STOCK_FINISHED');
+
+  // Sell 3rd glass (remaining = 0)
+  const sell3Res = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${s5Token}` }, { idempotency_key: `s5_sale3_${Date.now()}` });
+  assert.equal(sell3Res.status, 200);
+
+  // 4th sale attempt when stock = 0 -> 409 STOCK_FINISHED
+  const sell4Res = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${s5Token}` }, { idempotency_key: `s5_sale4_${Date.now()}` });
+  assert.equal(sell4Res.status, 409);
+  assert.equal(sell4Res.body.code, 'STOCK_FINISHED');
+  assert.equal(sell4Res.body.error, 'Item finished');
 });
 
 after(async () => {

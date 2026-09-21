@@ -126,6 +126,37 @@ export default function StallDashboard({ onLogout }) {
     }
   };
 
+  const handleSellParcel = async () => {
+    if (selling || dashboard?.closingSubmitted || !dashboard?.dayStarted) return;
+    if ((dashboard?.computedRemaining || 0) < 3) return;
+    setSelling(true);
+
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try { navigator.vibrate(30); } catch (e) {}
+    }
+
+    const idempotency_key = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `parcel_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+    try {
+      const res = await api.sellParcel(idempotency_key);
+      setDashboard(prev => prev ? { ...prev, soldToday: res.soldToday } : prev);
+      setShowCheckAnim(true);
+      setTimeout(() => setShowCheckAnim(false), 800);
+
+      const now = new Date();
+      setLastSaleTime(now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      setUndoTimeLeft(10);
+      setError('');
+      fetchDashboard();
+    } catch (err) {
+      setError(err.message || 'Not saved. Tap again.');
+    } finally {
+      setTimeout(() => setSelling(false), 200);
+    }
+  };
+
   const handleUndoLast = async () => {
     if (undoing || undoTimeLeft <= 0 || dashboard?.closingSubmitted) return;
     setUndoing(true);
@@ -318,9 +349,15 @@ export default function StallDashboard({ onLogout }) {
               type="button"
               className="btn-giant-sell"
               onClick={handleSellOne}
-              disabled={selling}
+              disabled={selling || (dashboard?.computedRemaining || 0) < 1}
+              style={{
+                opacity: (dashboard?.computedRemaining || 0) < 1 ? 0.6 : 1,
+                cursor: (dashboard?.computedRemaining || 0) < 1 ? 'not-allowed' : 'pointer'
+              }}
             >
-              {showCheckAnim ? (
+              {(dashboard?.computedRemaining || 0) < 1 ? (
+                <span className="btn-giant-sell-label">ITEM FINISHED</span>
+              ) : showCheckAnim ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Check size={48} strokeWidth={2} />
                   <span className="btn-giant-sell-label">RECORDED!</span>
@@ -331,6 +368,24 @@ export default function StallDashboard({ onLogout }) {
                   <span className="btn-giant-sell-subtext">₹40 per glass</span>
                 </>
               )}
+            </button>
+
+            {/* PARCEL SALE BUTTON (3 GLASSES - ₹120) */}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{
+                width: '100%',
+                minHeight: '52px',
+                marginBottom: 'var(--spacing-3)',
+                fontWeight: 700,
+                fontSize: '1rem',
+                border: '2px solid var(--border-subtle)'
+              }}
+              onClick={handleSellParcel}
+              disabled={selling || (dashboard?.computedRemaining || 0) < 3}
+            >
+              {(dashboard?.computedRemaining || 0) < 3 ? 'Item finished' : 'Parcel (3 Glasses - ₹120)'}
             </button>
 
             {/* Stat Row: Received count & Last sale time */}
@@ -364,9 +419,10 @@ export default function StallDashboard({ onLogout }) {
                 type="button"
                 className="btn btn-quiet"
                 onClick={() => setShowWastageModal(true)}
+                disabled={(dashboard?.computedRemaining || 0) < 1}
               >
                 <Trash2 size={18} strokeWidth={1.5} />
-                <span>Wastage</span>
+                <span>{(dashboard?.computedRemaining || 0) < 1 ? 'Item finished' : 'Wastage'}</span>
               </button>
 
               <button

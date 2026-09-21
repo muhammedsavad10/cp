@@ -109,7 +109,7 @@ const initDb = async () => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         stall_id INTEGER NOT NULL REFERENCES stalls(id),
         product_id INTEGER NOT NULL REFERENCES products(id),
-        quantity INTEGER NOT NULL CHECK(quantity IN (1, -1)),
+        quantity INTEGER NOT NULL CHECK(quantity IN (1, 3, -1, -3)),
         selling_price REAL NOT NULL,
         created_at TEXT NOT NULL,
         created_by INTEGER NOT NULL REFERENCES users(id),
@@ -118,8 +118,8 @@ const initDb = async () => {
         reversal_of INTEGER UNIQUE REFERENCES sales(id),
         reversal_reason TEXT,
         CHECK (
-          (quantity = 1 AND reversal_of IS NULL) OR
-          (quantity = -1 AND reversal_of IS NOT NULL)
+          (quantity IN (1, 3) AND reversal_of IS NULL) OR
+          (quantity IN (-1, -3) AND reversal_of IS NOT NULL)
         )
       )
     `);
