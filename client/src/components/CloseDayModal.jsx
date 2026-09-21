@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowLeft, CheckCircle, X, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { api } from '../api';
 
-export default function CloseDayModal({ isOpen, onClose, onSuccess, soldToday, computedRemaining }) {
+export default function CloseDayModal({ isOpen, onClose, onSuccess, onRefetch, soldToday, computedRemaining }) {
   const [step, setStep] = useState(1);
   const [cashReceived, setCashReceived] = useState('');
   const [upiReceived, setUpiReceived] = useState('');
@@ -10,6 +10,12 @@ export default function CloseDayModal({ isOpen, onClose, onSuccess, soldToday, c
   const [loading, setLoading] = useState(false);
   const [mismatchError, setMismatchError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    if (isOpen && onRefetch) {
+      onRefetch();
+    }
+  }, [isOpen, onRefetch]);
 
   if (!isOpen) return null;
 

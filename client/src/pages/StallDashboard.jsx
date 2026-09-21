@@ -384,8 +384,10 @@ export default function StallDashboard({ onLogout }) {
                   cursor: (dashboard?.computedRemaining || 0) < 3 ? 'not-allowed' : 'pointer'
                 }}
               >
-                {(dashboard?.computedRemaining || 0) < 3 ? (
-                  <span className="btn-parcel-sell-label" style={{ fontSize: '1rem' }}>NO STOCK</span>
+                {(dashboard?.computedRemaining || 0) <= 0 ? (
+                  <span className="btn-parcel-sell-label" style={{ fontSize: '1rem' }}>ITEM FINISHED</span>
+                ) : (dashboard?.computedRemaining || 0) < 3 ? (
+                  <span className="btn-parcel-sell-label" style={{ fontSize: '1rem' }}>Needs 3</span>
                 ) : (
                   <>
                     <span className="btn-parcel-sell-label">PARCEL</span>
@@ -456,6 +458,7 @@ export default function StallDashboard({ onLogout }) {
         isOpen={showCloseDayModal}
         onClose={() => setShowCloseDayModal(false)}
         onSuccess={fetchDashboard}
+        onRefetch={fetchDashboard}
         soldToday={dashboard?.soldToday}
         computedRemaining={dashboard?.computedRemaining}
       />

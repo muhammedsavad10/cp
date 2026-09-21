@@ -181,6 +181,29 @@ router.get('/dashboard', async (req, res) => {
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
       .slice(0, 20);
 
+    // Stall 1 specific metrics for stall1Status card
+    const s1SalesRow = await get(
+      `SELECT COALESCE(SUM(quantity), 0) as total_sold, 
+              COALESCE(SUM(quantity * selling_price), 0) as total_revenue 
+       FROM sales WHERE stall_id = 1 AND business_date = ?`,
+      [today]
+    );
+    const s1StockRow = await get(
+      `SELECT COALESCE(SUM(COALESCE(received_quantity, quantity)), 0) as total 
+       FROM stock_dispatches 
+       WHERE stall_id = 1 AND status = 'RECEIVED' AND received_business_date = ?`,
+      [today]
+    );
+    const s1WastageRow = await get(
+      `SELECT COALESCE(SUM(quantity), 0) as total FROM wastages WHERE stall_id = 1 AND business_date = ?`,
+      [today]
+    );
+    const s1Sold = s1SalesRow ? s1SalesRow.total_sold : 0;
+    const s1Revenue = s1SalesRow ? s1SalesRow.total_revenue : 0;
+    const s1Received = s1StockRow ? s1StockRow.total : 0;
+    const s1Wastage = s1WastageRow ? s1WastageRow.total : 0;
+    const s1ExpectedRemaining = s1Received - s1Sold - s1Wastage;
+
     return res.json({
       today,
       metrics: {
@@ -203,11 +226,11 @@ router.get('/dashboard', async (req, res) => {
       stall1Status: {
         id: 1,
         name: 'Stall 1',
-        received: totalStockReceived,
-        sold: totalSold,
-        wastage: totalWastage,
-        expectedRemaining,
-        revenue: totalRevenue,
+        received: s1Received,
+        sold: s1Sold,
+        wastage: s1Wastage,
+        expectedRemaining: s1ExpectedRemaining,
+        revenue: s1Revenue,
         profit,
         lastSaleTime: lastSale ? lastSale.created_at : null,
         isOnline: connStatus.isOnline,
@@ -285,7 +308,7 @@ router.post('/void-sale', async (req, res) => {
       return res.status(404).json({ error: 'Sale record not found' });
     }
 
-    if (sale.quantity !== 1) {
+    if (sale.quantity <= 0) {
       return res.status(400).json({ error: 'Cannot void a reversal record' });
     }
 
@@ -310,8 +333,8 @@ router.post('/void-sale', async (req, res) => {
 
     await run(
       `INSERT INTO sales (stall_id, product_id, quantity, selling_price, created_at, created_by, business_date, idempotency_key, reversal_of, reversal_reason)
-       VALUES (?, ?, -1, ?, ?, ?, ?, ?, ?, ?)`,
-      [sale.stall_id, sale.product_id, sale.selling_price, utcTimestamp, req.user.id, sale.business_date, voidIdempotencyKey, sale.id, reason]
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [sale.stall_id, sale.product_id, -sale.quantity, sale.selling_price, utcTimestamp, req.user.id, sale.business_date, voidIdempotencyKey, sale.id, reason]
     );
 
     // Broadcast Real-Time Event
