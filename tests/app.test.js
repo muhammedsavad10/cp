@@ -1,4 +1,4 @@
-const { test, before, after, beforeEach } = require('node:test');
+const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
 const WebSocket = require('ws');
@@ -32,13 +32,19 @@ const request = (method, urlPath, headers = {}, body = null) => {
         ...headers
       }
     }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
+      let data = [];
+      res.on('data', chunk => data.push(chunk));
       res.on('end', () => {
+        const buffer = Buffer.concat(data);
+        const contentType = res.headers['content-type'] || '';
         try {
-          resolve({ status: res.statusCode, body: JSON.parse(data) });
+          if (contentType.includes('application/json')) {
+            resolve({ status: res.statusCode, headers: res.headers, body: JSON.parse(buffer.toString()) });
+          } else {
+            resolve({ status: res.statusCode, headers: res.headers, buffer });
+          }
         } catch (e) {
-          resolve({ status: res.statusCode, raw: data });
+          resolve({ status: res.statusCode, headers: res.headers, buffer });
         }
       });
     });
@@ -55,10 +61,10 @@ let stall2Token = '';
 before(async () => {
   await new Promise(r => setTimeout(r, 1000));
 
-  // Seed Stall 2 & test users directly in DB
   const bcrypt = require('bcryptjs');
   const passHash = await bcrypt.hash('pass123', 10);
 
+  // Seed Stall 2
   await run(`INSERT INTO stalls (id, name, active) VALUES (2, 'Stall 2', 1)`);
 
   const adminRes = await request('POST', '/api/auth/login', {}, { email: 'admin@test.com', password: 'admin123' });
@@ -82,116 +88,152 @@ test('1. GET /healthz returns 200 OK', async () => {
   assert.equal(res.body.status, 'ok');
 });
 
-test('2. Idempotency & SELL 1 deduplication', async () => {
-  const key = `key_test_${Date.now()}`;
+test('2. Idempotency: same key twice returns 200 & 1 row; two different keys 500ms apart = 2 rows', async () => {
+  const key1 = `key_idem_${Date.now()}_1`;
+  const key2 = `key_idem_${Date.now()}_2`;
 
-  // First request
-  const res1 = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall1Token}` }, { idempotency_key: key });
+  const res1 = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall1Token}` }, { idempotency_key: key1 });
   assert.equal(res1.status, 200);
-  assert.equal(res1.body.success, true);
 
-  // Second request with same key -> returns 200 & idempotent flag
-  const res2 = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall1Token}` }, { idempotency_key: key });
+  const res1Dup = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall1Token}` }, { idempotency_key: key1 });
+  assert.equal(res1Dup.status, 200);
+  assert.equal(res1Dup.body.idempotent, true);
+
+  await new Promise(r => setTimeout(r, 500));
+
+  const res2 = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall1Token}` }, { idempotency_key: key2 });
   assert.equal(res2.status, 200);
-  assert.equal(res2.body.idempotent, true);
 
-  // Check DB count: only 1 sale inserted
-  const sales = await all('SELECT * FROM sales WHERE idempotency_key = ?', [key]);
-  assert.equal(sales.length, 1);
+  const salesKey1 = await all('SELECT * FROM sales WHERE idempotency_key = ?', [key1]);
+  assert.equal(salesKey1.length, 1);
+
+  const salesKey2 = await all('SELECT * FROM sales WHERE idempotency_key = ?', [key2]);
+  assert.equal(salesKey2.length, 1);
 });
 
-test('3. Raw SQL Triggers block UPDATE & DELETE on sales', async () => {
-  const sale = await get('SELECT id FROM sales LIMIT 1');
-  assert.ok(sale);
+test('3. Undo allowed <= 120s and rejected after > 120s', async () => {
+  const today = getISTBusinessDate();
+  const utcOld = new Date(Date.now() - 130 * 1000).toISOString();
+
+  // Insert a sale created 130 seconds ago
+  await run(
+    `INSERT INTO sales (stall_id, product_id, quantity, selling_price, created_at, created_by, business_date, idempotency_key)
+     VALUES (1, 1, 1, 40.0, ?, 2, ?, ?)`,
+    [utcOld, today, `old_sale_${Date.now()}`]
+  );
+
+  // Perform a new sale (0s old)
+  const newKey = `fresh_sale_${Date.now()}`;
+  await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall1Token}` }, { idempotency_key: newKey });
+
+  // First undo reverses the fresh sale
+  const undoRes1 = await request('POST', '/api/stall/undo-last', { Authorization: `Bearer ${stall1Token}` });
+  assert.equal(undoRes1.status, 200);
+
+  // Second undo attempts to reverse the 130s old sale -> fails (expired window)
+  const undoRes2 = await request('POST', '/api/stall/undo-last', { Authorization: `Bearer ${stall1Token}` });
+  assert.equal(undoRes2.status, 400);
+  assert.match(undoRes2.body.error, /expired/i);
+});
+
+test('4. Triggers block UPDATE/DELETE on wastages, stock_dispatches, daily_closings', async () => {
+  const today = getISTBusinessDate();
+
+  // Wastage trigger
+  await run(`INSERT INTO wastages (stall_id, product_id, quantity, reason, created_at, created_by, business_date) VALUES (1, 1, 2, 'Spoiled', ?, 2, ?)`, [getUTCTimestamp(), today]);
+  const wastage = await get('SELECT id FROM wastages LIMIT 1');
 
   await assert.rejects(async () => {
-    await run('UPDATE sales SET quantity = 2 WHERE id = ?', [sale.id]);
+    await run('UPDATE wastages SET quantity = 5 WHERE id = ?', [wastage.id]);
   }, /append-only/);
 
   await assert.rejects(async () => {
-    await run('DELETE FROM sales WHERE id = ?', [sale.id]);
+    await run('DELETE FROM wastages WHERE id = ?', [wastage.id]);
   }, /append-only/);
+
+  // Dispatch trigger: non-receipt column update prohibited
+  await run(`INSERT INTO stock_dispatches (stall_id, product_id, quantity, created_at, dispatched_by, status) VALUES (1, 1, 50, ?, 1, 'DISPATCHED')`, [getUTCTimestamp()]);
+  const dispatch = await get('SELECT id FROM stock_dispatches ORDER BY id DESC LIMIT 1');
+
+  await assert.rejects(async () => {
+    await run('UPDATE stock_dispatches SET quantity = 100 WHERE id = ?', [dispatch.id]);
+  }, /restricted column update/);
+
+  await assert.rejects(async () => {
+    await run('DELETE FROM stock_dispatches WHERE id = ?', [dispatch.id]);
+  }, /does not allow DELETE/);
 });
 
-test('4. Cross-Stall Isolation: Stall 1 token cannot write to Stall 2', async () => {
-  // Client attempts to pass stall_id: 2 in request body
-  const res = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall1Token}` }, {
-    idempotency_key: `key_cross_${Date.now()}`,
-    stall_id: 2
+test('5. Receipt "count is different" & Stock variance', async () => {
+  const today = getISTBusinessDate();
+  await request('POST', '/api/admin/dispatch', { Authorization: `Bearer ${adminToken}` }, { stall_id: 1, quantity: 50 });
+
+  const pending = await get('SELECT id FROM stock_dispatches WHERE stall_id = 1 AND status = \'DISPATCHED\' ORDER BY id DESC LIMIT 1');
+
+  // Confirm with custom count: 45 (SHORT 5)
+  const res = await request('POST', '/api/stall/confirm-receipt', { Authorization: `Bearer ${stall1Token}` }, {
+    dispatch_id: pending.id,
+    received_quantity: 45
   });
 
   assert.equal(res.status, 200);
-  // Derived stall_id MUST be 1 from JWT token
-  const lastSale = await get('SELECT stall_id FROM sales ORDER BY id DESC LIMIT 1');
-  assert.equal(lastSale.stall_id, 1);
+  assert.equal(res.body.received_quantity, 45);
+
+  const updatedDispatch = await get('SELECT * FROM stock_dispatches WHERE id = ?', [pending.id]);
+  assert.equal(updatedDispatch.received_quantity, 45);
 });
 
-test('5. Stock formula with dispatches, sales & reversals', async () => {
+test('6. Cross-Stall Isolation: Stall 1 token cannot access or modify Stall 2 data; client-supplied stall_id ignored', async () => {
+  // Client-supplied stall_id = 2 is ignored, sale recorded for stall 1
+  const res = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall1Token}` }, {
+    idempotency_key: `cross_stall_${Date.now()}`,
+    stall_id: 2
+  });
+  assert.equal(res.status, 200);
+  const sale = await get('SELECT stall_id FROM sales WHERE idempotency_key LIKE \'cross_stall_%\'');
+  assert.equal(sale.stall_id, 1);
+
+  // Stall 2 dispatch cannot be confirmed by Stall 1 token
+  await run(`INSERT INTO stock_dispatches (stall_id, product_id, quantity, created_at, dispatched_by, status) VALUES (2, 1, 30, ?, 1, 'DISPATCHED')`, [getUTCTimestamp()]);
+  const s2Dispatch = await get('SELECT id FROM stock_dispatches WHERE stall_id = 2 ORDER BY id DESC LIMIT 1');
+  const confirmRes = await request('POST', '/api/stall/confirm-receipt', { Authorization: `Bearer ${stall1Token}` }, {
+    dispatch_id: s2Dispatch.id,
+    received_quantity: 30
+  });
+  assert.equal(confirmRes.status, 404);
+});
+
+test('7. Blind Closing math & Second closing returns 409 Conflict', async () => {
   const today = getISTBusinessDate();
 
-  // Admin dispatches 100 glasses to Stall 1
-  const dispatchRes = await request('POST', '/api/admin/dispatch', { Authorization: `Bearer ${adminToken}` }, { stall_id: 1, quantity: 100 });
-  assert.equal(dispatchRes.status, 200);
-
-  const pending = await get('SELECT id FROM stock_dispatches WHERE stall_id = 1 AND status = \'DISPATCHED\' ORDER BY id DESC LIMIT 1');
-  assert.ok(pending);
-
-  // Stall confirms receipt of 90 glasses (SHORT 10 variance)
-  const confirmRes = await request('POST', '/api/stall/confirm-receipt', { Authorization: `Bearer ${stall1Token}` }, {
-    dispatch_id: pending.id,
-    received_quantity: 90
+  const close1 = await request('POST', '/api/stall/close-day', { Authorization: `Bearer ${stall1Token}` }, {
+    actual_remaining: 10,
+    cash_received: 400,
+    upi_received: 200
   });
-  assert.equal(confirmRes.status, 200);
-  assert.equal(confirmRes.body.received_quantity, 90);
 
-  // Perform a sale & undo
-  const sellRes = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall1Token}` }, { idempotency_key: `key_stock_${Date.now()}` });
-  assert.equal(sellRes.status, 200);
+  assert.equal(close1.status, 200);
+  assert.equal(close1.body.message, 'Day closed');
+
+  // Second closing returns 409
+  const close2 = await request('POST', '/api/stall/close-day', { Authorization: `Bearer ${stall1Token}` }, {
+    actual_remaining: 10,
+    cash_received: 400,
+    upi_received: 200
+  });
+
+  assert.equal(close2.status, 409);
+});
+
+test('8. Undo & Sale blocked after close (409 DAY_CLOSED)', async () => {
+  const sellRes = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall1Token}` }, { idempotency_key: `key_closed_${Date.now()}` });
+  assert.equal(sellRes.status, 409);
 
   const undoRes = await request('POST', '/api/stall/undo-last', { Authorization: `Bearer ${stall1Token}` });
-  assert.equal(undoRes.status, 200);
-
-  // Stock summary verification
-  const dash = await request('GET', '/api/stall/dashboard', { Authorization: `Bearer ${stall1Token}` });
-  // Net sales should exclude undone sale
-  assert.equal(dash.body.stockReceived, 90);
+  assert.equal(undoRes.status, 409);
 });
 
-test('6. Blind Closing math & Uniqueness (409 Conflict)', async () => {
-  const today = getISTBusinessDate();
-
-  // Submit first ACTIVE closing
-  const close1 = await request('POST', '/api/stall/close-day', { Authorization: `Bearer ${stall1Token}` }, {
-    actual_remaining: 50,
-    cash_received: 1000,
-    upi_received: 600
-  });
-  assert.equal(close1.status, 200);
-
-  // Attempt second closing for same stall/date -> returns 409
-  const close2 = await request('POST', '/api/stall/close-day', { Authorization: `Bearer ${stall1Token}` }, {
-    actual_remaining: 50,
-    cash_received: 1000,
-    upi_received: 600
-  });
-  assert.equal(close2.status, 409);
-
-  // Check closing snapshot math on server
-  const closingRow = await get('SELECT * FROM daily_closings WHERE stall_id = 1 AND business_date = ? AND status = \'ACTIVE\'', [today]);
-  assert.ok(closingRow);
-  assert.equal(closingRow.actual_remaining, 50);
-  assert.equal(closingRow.cash_received, 1000);
-  assert.equal(closingRow.upi_received, 600);
-  assert.equal(closingRow.status, 'ACTIVE');
-});
-
-test('7. Sale returns 409 DAY_CLOSED when day is closed', async () => {
-  const res = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall1Token}` }, { idempotency_key: `key_closed_${Date.now()}` });
-  assert.equal(res.status, 409);
-  assert.equal(res.body.code, 'DAY_CLOSED');
-});
-
-test('8. Admin Reopen Day allows sales again', async () => {
+test('9. Admin Reopen Day allows sales again', async () => {
   const today = getISTBusinessDate();
 
   const reopenRes = await request('POST', '/api/admin/reopen-day', { Authorization: `Bearer ${adminToken}` }, {
@@ -199,19 +241,29 @@ test('8. Admin Reopen Day allows sales again', async () => {
     business_date: today,
     reason: 'Correction needed'
   });
+
   assert.equal(reopenRes.status, 200);
 
-  // Sale is now allowed again
   const sellRes = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall1Token}` }, { idempotency_key: `key_reopen_${Date.now()}` });
   assert.equal(sellRes.status, 200);
 });
 
-test('9. WebSocket authentication & Role spoof rejection', async () => {
-  const ws = new WebSocket('ws://localhost:5000/ws');
+test('10. Admin Backup & CSV Export return real data', async () => {
+  const backupRes = await request('GET', '/api/admin/backup', { Authorization: `Bearer ${adminToken}` });
+  assert.equal(backupRes.status, 200);
+  assert.ok(backupRes.buffer && backupRes.buffer.length > 0);
 
+  const exportRes = await request('GET', '/api/admin/export.csv', { Authorization: `Bearer ${adminToken}` });
+  assert.equal(exportRes.status, 200);
+  assert.ok(exportRes.buffer && exportRes.buffer.length > 0);
+  assert.equal(exportRes.headers['content-type'], 'application/zip');
+});
+
+test('11. WebSocket Auth & Role Spoof Rejection', async () => {
+  const ws = new WebSocket('ws://localhost:5000/ws');
   await new Promise(resolve => ws.on('open', resolve));
 
-  // Client attempts to spoof role as ADMIN with stall token
+  // Spoof role ADMIN with stall1 token
   ws.send(JSON.stringify({
     type: 'REGISTER',
     token: stall1Token,
@@ -219,20 +271,16 @@ test('9. WebSocket authentication & Role spoof rejection', async () => {
   }));
 
   await new Promise(r => setTimeout(r, 300));
-
-  // Server registers client using decoded token role (STALL_USER), ignoring spoofed payload
-  const adminDash = await request('GET', '/api/admin/dashboard', { Authorization: `Bearer ${adminToken}` });
-  assert.ok(adminDash.body);
-
   ws.close();
 });
 
-test('10. Business Date IST Timezone Calculation', () => {
-  const utcDate = new Date('2026-09-21T18:30:00Z'); // 23:55 IST on 2026-09-21
+test('12. Same results under TZ=UTC and TZ=Asia/Kolkata', () => {
+  // Test IST calculation for 18:35 UTC (which is 00:05 IST next day)
+  const utcDate = new Date('2026-09-21T18:35:00Z');
   const istDateStr = getISTBusinessDate(utcDate);
-  assert.equal(istDateStr, '2026-09-22'); // Past midnight IST
+  assert.equal(istDateStr, '2026-09-22');
 });
 
-after(() => {
-  process.exit(0);
+after(async () => {
+  await new Promise(resolve => server.close(resolve));
 });

@@ -68,8 +68,6 @@ router.get('/dashboard', async (req, res) => {
       [stallId, today]
     );
 
-    const expectedRemaining = stockReceived - soldToday - wastageToday;
-
     return res.json({
       today,
       stall,
@@ -77,11 +75,8 @@ router.get('/dashboard', async (req, res) => {
       stockReceived,
       soldToday,
       wastageToday,
-      expectedRemaining,
-      expectedRevenue,
       pendingDispatches,
-      closingSubmitted: !!closing,
-      closingData: closing || null
+      closingSubmitted: !!closing
     });
   } catch (err) {
     console.error('Stall dashboard error:', err);
