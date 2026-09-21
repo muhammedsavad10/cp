@@ -11,8 +11,12 @@ export default function AdminDashboard({ onLogout }) {
   const [moneyLog, setMoneyLog] = useState(null);
   const [reportsData, setReportsData] = useState(null);
   const [dispatchQty, setDispatchQty] = useState('50');
+  const [voidSaleId, setVoidSaleId] = useState(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [reopenReason, setReopenReason] = useState('');
+  const [showReopenModal, setShowReopenModal] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [dispatchSuccess, setDispatchSuccess] = useState('');
+  const [actionSuccess, setActionSuccess] = useState('');
   const [error, setError] = useState('');
 
   const fetchAllData = useCallback(async () => {
@@ -37,19 +41,17 @@ export default function AdminDashboard({ onLogout }) {
     }
   }, []);
 
-  // Handle incoming real-time events via WebSockets!
   const handleWSEvent = useCallback((data) => {
     if (data.type === 'STALL_ACTION' || data.type === 'STALL_STATUS_CHANGE') {
       fetchAllData();
     }
   }, [fetchAllData]);
 
-  // Connect WebSockets
   const { isConnected: isWSConnected } = useWebSocket(handleWSEvent);
 
   useEffect(() => {
     fetchAllData();
-    const interval = setInterval(fetchAllData, 15000); // Polling backup
+    const interval = setInterval(fetchAllData, 15000);
     return () => clearInterval(interval);
   }, [fetchAllData]);
 
@@ -58,33 +60,75 @@ export default function AdminDashboard({ onLogout }) {
     if (!dispatchQty || Number(dispatchQty) <= 0) return;
 
     try {
-      setDispatchSuccess('');
+      setActionSuccess('');
       const res = await api.dispatchStock({ stall_id: 1, quantity: Number(dispatchQty) });
-      setDispatchSuccess(res.message || `Successfully dispatched ${dispatchQty} glasses!`);
-      setTimeout(() => setDispatchSuccess(''), 4000);
+      setActionSuccess(res.message || `Successfully dispatched ${dispatchQty} glasses!`);
+      setTimeout(() => setActionSuccess(''), 4000);
       fetchAllData();
     } catch (err) {
       setError(err.message || 'Dispatch failed');
     }
   };
 
-  const formatTime = (timeStr) => {
-    if (!timeStr) return '—';
+  const handleVoidSale = async (e) => {
+    e.preventDefault();
+    if (!voidSaleId || !voidReason) return;
+
     try {
-      const d = new Date(timeStr);
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    } catch (e) {
-      return timeStr;
+      setActionSuccess('');
+      const res = await api.voidSale({ sale_id: voidSaleId, reason: voidReason });
+      setActionSuccess(res.message || `Sale #${voidSaleId} voided.`);
+      setVoidSaleId(null);
+      setVoidReason('');
+      setTimeout(() => setActionSuccess(''), 4000);
+      fetchAllData();
+    } catch (err) {
+      setError(err.message || 'Void sale failed');
     }
   };
 
-  const formatTimeShort = (timeStr) => {
-    if (!timeStr) return '—';
+  const handleReopenDay = async (e) => {
+    e.preventDefault();
+    if (!reopenReason) return;
+
     try {
-      const d = new Date(timeStr);
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setActionSuccess('');
+      const today = dashboardData?.today;
+      const res = await api.reopenDay({ stall_id: 1, business_date: today, reason: reopenReason });
+      setActionSuccess(res.message || 'Day reopened successfully.');
+      setShowReopenModal(false);
+      setReopenReason('');
+      setTimeout(() => setActionSuccess(''), 4000);
+      fetchAllData();
+    } catch (err) {
+      setError(err.message || 'Reopen day failed');
+    }
+  };
+
+  const handleBackup = () => {
+    window.open('/api/admin/backup', '_blank');
+  };
+
+  const handleExportCSV = () => {
+    const today = dashboardData?.today || new Date().toISOString().split('T')[0];
+    window.open(`/api/admin/export.csv?from=${today}&to=${today}`, '_blank');
+  };
+
+  const formatTime = (isoStr) => {
+    if (!isoStr) return '—';
+    try {
+      return new Date(isoStr).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' });
     } catch (e) {
-      return timeStr;
+      return isoStr;
+    }
+  };
+
+  const formatTimeShort = (isoStr) => {
+    if (!isoStr) return '—';
+    try {
+      return new Date(isoStr).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+      return isoStr;
     }
   };
 
@@ -101,28 +145,56 @@ export default function AdminDashboard({ onLogout }) {
 
   const metrics = dashboardData?.metrics || {};
   const stall1 = dashboardData?.stall1Status || {};
+  const closing = dashboardData?.closing || null;
 
   return (
     <div className="app-container admin-container">
       <Navbar onLogout={onLogout} />
 
-      {/* Admin Sub-navigation Tabs */}
-      <nav className="admin-tabs">
-        {['dashboard', 'stall', 'stock', 'sales', 'money', 'reports'].map((tab) => (
+      {/* Admin Navigation Tabs & Action Controls */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'white', borderBottom: '1px solid var(--border-color)', paddingRight: 16 }}>
+        <nav className="admin-tabs" style={{ borderBottom: 'none' }}>
+          {['dashboard', 'stall', 'stock', 'sales', 'money', 'reports'].map((tab) => (
+            <button
+              key={tab}
+              className={`tab-btn ${activeTab === tab ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab.toUpperCase()}
+            </button>
+          ))}
+        </nav>
+
+        <div style={{ display: 'flex', gap: 8 }}>
           <button
-            key={tab}
-            className={`tab-btn ${activeTab === tab ? 'active' : ''}`}
-            onClick={() => setActiveTab(tab)}
+            type="button"
+            className="btn-action"
+            style={{ padding: '6px 12px', fontSize: '0.8rem', background: '#f1f5f9', color: '#1e293b' }}
+            onClick={handleBackup}
           >
-            {tab.toUpperCase()}
+            💾 Backup DB
           </button>
-        ))}
-      </nav>
+          <button
+            type="button"
+            className="btn-action"
+            style={{ padding: '6px 12px', fontSize: '0.8rem', background: '#e0e7ff', color: '#3730a3' }}
+            onClick={handleExportCSV}
+          >
+            📥 Export CSV
+          </button>
+        </div>
+      </div>
 
       <main className="main-content">
         {error && (
           <div className="badge badge-danger" style={{ width: '100%', padding: 10 }}>
             {error}
+          </div>
+        )}
+
+        {actionSuccess && (
+          <div className="badge badge-success" style={{ width: '100%', padding: 10 }}>
+            {actionSuccess}
           </div>
         )}
 
@@ -133,7 +205,7 @@ export default function AdminDashboard({ onLogout }) {
               <div>
                 <h2 style={{ fontSize: '1.3rem', fontWeight: 900, color: '#0f172a' }}>PAYASAM ADMIN</h2>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                  TODAY &bull; {dashboardData?.today}
+                  TODAY &bull; {dashboardData?.today} (IST)
                 </p>
               </div>
               <span className={`badge ${isWSConnected ? 'badge-success' : 'badge-warning'}`}>
@@ -141,7 +213,19 @@ export default function AdminDashboard({ onLogout }) {
               </span>
             </div>
 
-            {/* LIVE STALL STATUS CARD (Primary Requirement) */}
+            {/* Flags Alert */}
+            {metrics.isOverSold && (
+              <div className="badge badge-warning" style={{ width: '100%', padding: 10 }}>
+                ⚠️ Flagged: Sold beyond recorded stock!
+              </div>
+            )}
+            {metrics.isLargeWastage && (
+              <div className="badge badge-danger" style={{ width: '100%', padding: 10 }}>
+                🚨 Flagged: Total wastage is &gt; 10% of total stock received today!
+              </div>
+            )}
+
+            {/* LIVE STALL STATUS CARD */}
             <div className="card" style={{ background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)', border: '2px solid #cbd5e1' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <div>
@@ -195,79 +279,64 @@ export default function AdminDashboard({ onLogout }) {
 
               <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#64748b', fontWeight: 600 }}>
                 <span>Last transaction: <strong>{formatTime(stall1.lastSaleTime)}</strong></span>
-                <span>Status: <strong style={{ color: '#16a34a' }}>🟢 LIVE</strong></span>
+                <span>Reversals today: <strong>{metrics.reversalsToday || 0}</strong></span>
               </div>
             </div>
 
-            {/* Overview Stats Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12 }}>
-              <div className="card" style={{ padding: 14 }}>
-                <div className="card-title" style={{ fontSize: '0.75rem' }}>Sales</div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--primary)' }}>
-                  {metrics.totalSold} <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>glasses</span>
-                </div>
-              </div>
-
-              <div className="card" style={{ padding: 14 }}>
-                <div className="card-title" style={{ fontSize: '0.75rem' }}>Revenue</div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#047857' }}>
-                  ₹{(metrics.totalRevenue || 0).toLocaleString()}
-                </div>
-              </div>
-
-              <div className="card" style={{ padding: 14 }}>
-                <div className="card-title" style={{ fontSize: '0.75rem' }}>Stock Received</div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>
-                  {metrics.totalStockReceived}
-                </div>
-              </div>
-
-              <div className="card" style={{ padding: 14 }}>
-                <div className="card-title" style={{ fontSize: '0.75rem' }}>Expected Remaining</div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#2563eb' }}>
-                  {metrics.expectedRemaining}
-                </div>
-              </div>
-            </div>
-
-            {/* Money Reconciliation Card */}
+            {/* TWO SEPARATE STATUSES: Stock Check & Money Check */}
             <div className="card" style={{ padding: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <div className="card-title" style={{ margin: 0 }}>Cash & UPI Reconciliation</div>
-                {moneyLog?.isClosed ? (
-                  moneyLog?.isMatched ? (
-                    <span className="badge badge-success">🟢 MATCHED</span>
-                  ) : (
-                    <span className="badge badge-danger">🔴 DISCREPANCY</span>
-                  )
-                ) : (
-                  <span className="badge badge-warning">🟠 UNCLOSED</span>
-                )}
-              </div>
+              <div className="card-title">Daily Closing Statuses</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ padding: 14, background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Stock Check</div>
+                  <div style={{ marginTop: 6 }}>
+                    {closing ? (
+                      closing.stock_status === 'MATCHED' ? (
+                        <span className="badge badge-success" style={{ fontSize: '1rem' }}>🟢 MATCHED (₹0)</span>
+                      ) : closing.stock_status === 'SHORT' ? (
+                        <span className="badge badge-danger" style={{ fontSize: '1rem' }}>🔴 SHORT ({closing.stock_variance} glasses / ₹{Math.abs(closing.stock_variance_value)})</span>
+                      ) : (
+                        <span className="badge badge-warning" style={{ fontSize: '1rem' }}>🟠 EXTRA (+{closing.stock_variance} glasses / +₹{closing.stock_variance_value})</span>
+                      )
+                    ) : (
+                      <span className="badge badge-warning">UNCLOSED</span>
+                    )}
+                  </div>
+                </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 10, textAlign: 'center' }}>
-                <div className="stock-item">
-                  <div className="stock-label">Expected</div>
-                  <div className="stock-value">₹{(metrics.totalRevenue || 0).toLocaleString()}</div>
-                </div>
-                <div className="stock-item">
-                  <div className="stock-label">Cash</div>
-                  <div className="stock-value">₹{metrics.cashReceived !== null ? metrics.cashReceived : '—'}</div>
-                </div>
-                <div className="stock-item">
-                  <div className="stock-label">UPI</div>
-                  <div className="stock-value">₹{metrics.upiReceived !== null ? metrics.upiReceived : '—'}</div>
-                </div>
-                <div className="stock-item">
-                  <div className="stock-label">Discrepancy</div>
-                  <div className="stock-value" style={{ color: metrics.discrepancy === 0 ? '#16a34a' : '#dc2626' }}>
-                    {metrics.discrepancy !== null ? `₹${metrics.discrepancy}` : '—'}
+                <div style={{ padding: 14, background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Money Check</div>
+                  <div style={{ marginTop: 6 }}>
+                    {closing ? (
+                      closing.money_status === 'MATCHED' ? (
+                        <span className="badge badge-success" style={{ fontSize: '1rem' }}>🟢 MATCHED (₹0)</span>
+                      ) : closing.money_status === 'SHORT' ? (
+                        <span className="badge badge-danger" style={{ fontSize: '1rem' }}>🔴 SHORT (₹{Math.abs(closing.money_difference)})</span>
+                      ) : (
+                        <span className="badge badge-warning" style={{ fontSize: '1rem' }}>🟠 EXTRA (+₹{closing.money_difference})</span>
+                      )
+                    ) : (
+                      <span className="badge badge-warning">UNCLOSED</span>
+                    )}
                   </div>
                 </div>
               </div>
+
+              {closing && (
+                <div style={{ marginTop: 12, textAlign: 'right' }}>
+                  <button
+                    type="button"
+                    className="btn-action"
+                    style={{ background: '#fee2e2', color: '#991b1b', fontSize: '0.85rem', padding: '6px 12px' }}
+                    onClick={() => setShowReopenModal(true)}
+                  >
+                    🔓 Reopen Day
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* LIVE ACTIVITY FEED */}
+            {/* REAL-TIME ACTIVITY FEED */}
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <div className="card-title" style={{ margin: 0 }}>REAL-TIME ACTIVITY FEED</div>
@@ -357,7 +426,7 @@ export default function AdminDashboard({ onLogout }) {
             {/* Quick Dispatch Card */}
             <div className="card" style={{ background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)', border: '1px solid #86efac' }}>
               <div className="card-title" style={{ color: '#166534' }}>Today's Dispatch to Stall 1</div>
-              {dispatchSuccess && <div className="badge badge-success" style={{ marginBottom: 10 }}>{dispatchSuccess}</div>}
+              {actionSuccess && <div className="badge badge-success" style={{ marginBottom: 10 }}>{actionSuccess}</div>}
 
               <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                 <div style={{ flex: 1 }}>
@@ -374,39 +443,8 @@ export default function AdminDashboard({ onLogout }) {
                   style={{ width: 'auto', padding: '14px 24px', marginTop: 18 }}
                   onClick={handleDispatch}
                 >
-                  DISPATCH 50
+                  DISPATCH
                 </button>
-              </div>
-            </div>
-
-            {/* Stock Breakdown */}
-            <div className="card">
-              <div className="card-title">Stock Summary</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 10, textAlign: 'center' }}>
-                <div className="stock-item">
-                  <div className="stock-label">Product</div>
-                  <div style={{ fontWeight: 800, fontSize: '0.95rem', marginTop: 4 }}>Butter Fruit</div>
-                </div>
-                <div className="stock-item">
-                  <div className="stock-label">Received</div>
-                  <div className="stock-value">{stockLog?.totalReceived || 0}</div>
-                </div>
-                <div className="stock-item">
-                  <div className="stock-label">Sold</div>
-                  <div className="stock-value">{stockLog?.totalSold || 0}</div>
-                </div>
-                <div className="stock-item">
-                  <div className="stock-label">Wastage</div>
-                  <div className="stock-value">{stockLog?.totalWastage || 0}</div>
-                </div>
-                <div className="stock-item">
-                  <div className="stock-label">Expected</div>
-                  <div className="stock-value expected">{stockLog?.expectedRemaining || 0}</div>
-                </div>
-                <div className="stock-item">
-                  <div className="stock-label">Actual</div>
-                  <div className="stock-value">{stockLog?.actualRemaining !== null ? stockLog?.actualRemaining : '—'}</div>
-                </div>
               </div>
             </div>
 
@@ -418,9 +456,8 @@ export default function AdminDashboard({ onLogout }) {
                   <thead>
                     <tr>
                       <th>Time</th>
-                      <th>Qty</th>
-                      <th>Dispatched By</th>
-                      <th>Received By</th>
+                      <th>Dispatched Qty</th>
+                      <th>Received Qty</th>
                       <th>Status</th>
                     </tr>
                   </thead>
@@ -430,18 +467,20 @@ export default function AdminDashboard({ onLogout }) {
                         <tr key={d.id}>
                           <td>{formatTimeShort(d.created_at)}</td>
                           <td style={{ fontWeight: 800 }}>{d.quantity}</td>
-                          <td>{d.dispatched_by_name || 'Admin'}</td>
-                          <td>{d.received_by_name || '—'}</td>
+                          <td style={{ fontWeight: 800 }}>{d.received_quantity !== null ? d.received_quantity : '—'}</td>
                           <td>
                             <span className={`badge ${d.status === 'RECEIVED' ? 'badge-success' : 'badge-warning'}`}>
                               {d.status}
+                              {d.received_quantity !== null && d.received_quantity !== d.quantity && (
+                                ` (${d.received_quantity < d.quantity ? 'SHORT' : 'MORE'})`
+                              )}
                             </span>
                           </td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan="5" style={{ textAlign: 'center', color: '#94a3b8' }}>No stock dispatches today.</td>
+                        <td colSpan="4" style={{ textAlign: 'center', color: '#94a3b8' }}>No stock dispatches today.</td>
                       </tr>
                     )}
                   </tbody>
@@ -457,7 +496,7 @@ export default function AdminDashboard({ onLogout }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <h2 style={{ fontSize: '1.3rem', fontWeight: 900 }}>TODAY'S SALES LOG</h2>
-                <p style={{ fontSize: '0.85rem', color: '#64748b' }}>Append-Only Real-Time Sales Audit</p>
+                <p style={{ fontSize: '0.85rem', color: '#64748b' }}>Reversals today: {metrics.reversalsToday || 0}</p>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Total Revenue</div>
@@ -472,57 +511,87 @@ export default function AdminDashboard({ onLogout }) {
                 <table>
                   <thead>
                     <tr>
+                      <th>ID</th>
                       <th>Time</th>
-                      <th>Product</th>
                       <th>Qty</th>
                       <th>Amount</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {salesLog?.sales?.length > 0 ? (
                       salesLog.sales.map((sale) => (
-                        <tr key={sale.id}>
+                        <tr key={sale.id} style={{ background: sale.quantity < 0 ? '#fee2e2' : 'inherit' }}>
+                          <td>#{sale.id}</td>
                           <td>{formatTime(sale.created_at)}</td>
-                          <td style={{ fontWeight: 700 }}>{sale.product_name}</td>
-                          <td style={{ fontWeight: 800 }}>{sale.quantity}</td>
-                          <td style={{ fontWeight: 800, color: '#059669' }}>₹{sale.quantity * sale.selling_price}</td>
+                          <td style={{ fontWeight: 800, color: sale.quantity < 0 ? '#dc2626' : '#10b981' }}>
+                            {sale.quantity > 0 ? `+${sale.quantity}` : sale.quantity}
+                          </td>
+                          <td style={{ fontWeight: 800 }}>₹{sale.quantity * sale.selling_price}</td>
+                          <td>
+                            {sale.quantity > 0 && !salesLog.sales.some(s => s.reversal_of === sale.id) ? (
+                              <button
+                                type="button"
+                                className="btn-action"
+                                style={{ padding: '4px 8px', fontSize: '0.8rem', background: '#fee2e2', color: '#991b1b' }}
+                                onClick={() => setVoidSaleId(sale.id)}
+                              >
+                                Void
+                              </button>
+                            ) : sale.quantity < 0 ? (
+                              <span style={{ fontSize: '0.8rem', color: '#991b1b', fontWeight: 700 }}>
+                                Reversal (#{sale.reversal_of})
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Voided</span>
+                            )}
+                          </td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan="4" style={{ textAlign: 'center', color: '#94a3b8' }}>No sales recorded today.</td>
+                        <td colSpan="5" style={{ textAlign: 'center', color: '#94a3b8' }}>No sales recorded today.</td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
             </div>
+
+            {/* Void Sale Modal */}
+            {voidSaleId && (
+              <div className="modal-overlay" onClick={() => setVoidSaleId(null)}>
+                <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <h3 className="modal-title">VOID SALE #{voidSaleId}</h3>
+                    <button className="btn-close-modal" onClick={() => setVoidSaleId(null)}>&times;</button>
+                  </div>
+                  <form onSubmit={handleVoidSale}>
+                    <div className="form-group">
+                      <label className="form-label">Void Reason (Required)</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. Customer changed mind / accidental entry"
+                        value={voidReason}
+                        onChange={(e) => setVoidReason(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <button type="submit" className="btn-submit" style={{ background: '#dc2626' }}>
+                      CONFIRM VOID SALE
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
           </>
         )}
 
         {/* 5. MONEY VIEW */}
         {activeTab === 'money' && (
           <>
-            <h2 style={{ fontSize: '1.3rem', fontWeight: 900 }}>MONEY & CASH RECONCILIATION</h2>
-
-            <div className="card" style={{ textAlign: 'center', padding: 24 }}>
-              <div className="card-title">Match Status</div>
-              {moneyLog?.isClosed ? (
-                moneyLog?.isMatched ? (
-                  <div className="badge badge-success" style={{ fontSize: '1.4rem', padding: '10px 24px' }}>
-                    🟢 MATCHED
-                  </div>
-                ) : (
-                  <div className="badge badge-danger" style={{ fontSize: '1.4rem', padding: '10px 24px' }}>
-                    🔴 DISCREPANCY
-                  </div>
-                )
-              ) : (
-                <div className="badge badge-warning" style={{ fontSize: '1.2rem', padding: '8px 20px' }}>
-                  🟠 UNCLOSED DAY
-                </div>
-              )}
-            </div>
+            <h2 style={{ fontSize: '1.3rem', fontWeight: 900 }}>MONEY & RECONCILIATION</h2>
 
             <div className="card">
               <div className="card-title">Financial Breakdown</div>
@@ -548,9 +617,9 @@ export default function AdminDashboard({ onLogout }) {
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0' }}>
-                  <span style={{ fontWeight: 800 }}>Discrepancy / Difference</span>
-                  <span style={{ fontWeight: 900, fontSize: '1.2rem', color: moneyLog?.discrepancy === 0 ? '#16a34a' : '#dc2626' }}>
-                    {moneyLog?.discrepancy !== null ? `₹${moneyLog?.discrepancy}` : '—'}
+                  <span style={{ fontWeight: 800 }}>Money Difference</span>
+                  <span style={{ fontWeight: 900, fontSize: '1.2rem', color: moneyLog?.moneyDifference === 0 ? '#16a34a' : '#dc2626' }}>
+                    {moneyLog?.moneyDifference !== null ? `₹${moneyLog?.moneyDifference}` : '—'}
                   </span>
                 </div>
               </div>
@@ -592,13 +661,6 @@ export default function AdminDashboard({ onLogout }) {
                   </span>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #e2e8f0' }}>
-                  <span style={{ fontWeight: 600 }}>Staff Cost</span>
-                  <span style={{ fontWeight: 800, fontSize: '1.1rem', color: '#64748b' }}>
-                    ₹{(reportsData?.staffCost || 0).toLocaleString()}
-                  </span>
-                </div>
-
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0', background: '#ffffff', borderRadius: 8, paddingLeft: 12, paddingRight: 12, border: '2px solid #bbf7d0' }}>
                   <span style={{ fontWeight: 900, fontSize: '1.1rem', color: '#065f46' }}>Estimated Operating Profit</span>
                   <span style={{ fontWeight: 900, fontSize: '1.3rem', color: '#059669' }}>
@@ -610,6 +672,34 @@ export default function AdminDashboard({ onLogout }) {
           </>
         )}
       </main>
+
+      {/* Reopen Day Modal */}
+      {showReopenModal && (
+        <div className="modal-overlay" onClick={() => setShowReopenModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">REOPEN DAY</h3>
+              <button className="btn-close-modal" onClick={() => setShowReopenModal(false)}>&times;</button>
+            </div>
+            <form onSubmit={handleReopenDay}>
+              <div className="form-group">
+                <label className="form-label">Reopen Reason (Required)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Closing count error correction"
+                  value={reopenReason}
+                  onChange={(e) => setReopenReason(e.target.value)}
+                  required
+                />
+              </div>
+              <button type="submit" className="btn-submit" style={{ background: '#ea580c' }}>
+                REOPEN DAY
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

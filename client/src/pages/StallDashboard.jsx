@@ -9,9 +9,12 @@ export default function StallDashboard({ onLogout }) {
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selling, setSelling] = useState(false);
+  const [undoing, setUndoing] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [showWastageModal, setShowWastageModal] = useState(false);
   const [showCloseDayModal, setShowCloseDayModal] = useState(false);
+  const [customReceiptQty, setCustomReceiptQty] = useState('');
+  const [selectedDispatch, setSelectedDispatch] = useState(null);
   const [error, setError] = useState('');
 
   const toastTimerRef = useRef(null);
@@ -28,53 +31,71 @@ export default function StallDashboard({ onLogout }) {
     }
   }, []);
 
-  // Handle incoming real-time events (e.g. stock dispatched by admin)
   const handleWSEvent = useCallback((event) => {
-    if (event.type === 'STALL_ACTION' && event.payload?.eventType === 'DISPATCH') {
+    if (event.type === 'STALL_ACTION') {
       fetchDashboard();
     }
   }, [fetchDashboard]);
 
-  // Connect WebSocket & Heartbeat
   const { isConnected } = useWebSocket(handleWSEvent);
 
   useEffect(() => {
     fetchDashboard();
-    const interval = setInterval(fetchDashboard, 10000); // Poll fallback
+    const interval = setInterval(fetchDashboard, 10000);
     return () => clearInterval(interval);
   }, [fetchDashboard]);
 
   const handleSellOne = async () => {
-    if (selling) return; // Debounce guard
-
+    if (selling) return;
     setSelling(true);
 
+    const idempotency_key = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `sell_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
     try {
-      const res = await api.sellOne();
+      const res = await api.sellOne(idempotency_key);
       setDashboard(prev => prev ? {
         ...prev,
-        soldToday: res.soldToday,
-        expectedRemaining: prev.stockReceived - res.soldToday - prev.wastageToday,
-        expectedRevenue: res.expectedRevenue
+        soldToday: res.soldToday
       } : prev);
 
-      setToastMessage('✓ Sale Recorded (+1)');
+      setToastMessage(res.warning ? `✓ Sale Recorded (${res.warning})` : '✓ Sale Recorded (+1)');
 
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-      toastTimerRef.current = setTimeout(() => setToastMessage(''), 1500);
+      toastTimerRef.current = setTimeout(() => setToastMessage(''), 2000);
 
-      // Refresh full dashboard async
       fetchDashboard();
     } catch (err) {
       setError(err.message || 'Failed to record sale');
     } finally {
-      setTimeout(() => setSelling(false), 300); // 300ms debounce buffer
+      setTimeout(() => setSelling(false), 300);
     }
   };
 
-  const handleConfirmReceipt = async (dispatch_id) => {
+  const handleUndoLast = async () => {
+    if (undoing) return;
+    setUndoing(true);
+
     try {
-      await api.confirmReceipt(dispatch_id);
+      await api.undoLastSale();
+      setToastMessage('↺ Last Sale Undone');
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setToastMessage(''), 2000);
+      fetchDashboard();
+    } catch (err) {
+      setError(err.message || 'Failed to undo sale');
+    } finally {
+      setUndoing(false);
+    }
+  };
+
+  const handleConfirmReceipt = async (dispatch, qtyInput) => {
+    try {
+      const qty = qtyInput !== undefined ? Number(qtyInput) : dispatch.quantity;
+      await api.confirmReceipt(dispatch.id, qty);
+      setSelectedDispatch(null);
+      setCustomReceiptQty('');
       fetchDashboard();
     } catch (err) {
       setError(err.message || 'Failed to confirm stock receipt');
@@ -83,7 +104,7 @@ export default function StallDashboard({ onLogout }) {
 
   const formatDate = () => {
     const options = { weekday: 'long', day: 'numeric', month: 'long' };
-    return new Date().toLocaleDateString('en-US', options);
+    return new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', ...options });
   };
 
   if (loading) {
@@ -134,7 +155,7 @@ export default function StallDashboard({ onLogout }) {
         {pendingDispatches.map((dispatch) => (
           <div key={dispatch.id} className="dispatch-banner">
             <div>
-              <div className="dispatch-title">📦 STOCK RECEIVED</div>
+              <div className="dispatch-title">📦 STOCK DISPATCHED</div>
               <div style={{ fontSize: '1.2rem', fontWeight: 800, marginTop: 2 }}>
                 {dispatch.quantity} glasses
               </div>
@@ -142,12 +163,43 @@ export default function StallDashboard({ onLogout }) {
                 Dispatched by {dispatch.dispatched_by_name || 'Admin'}
               </div>
             </div>
-            <button
-              className="btn-confirm-receipt"
-              onClick={() => handleConfirmReceipt(dispatch.id)}
-            >
-              CONFIRM RECEIPT
-            </button>
+
+            <div style={{ display: 'flex', gap: 8, flexDirection: 'column' }}>
+              <button
+                className="btn-confirm-receipt"
+                onClick={() => handleConfirmReceipt(dispatch, dispatch.quantity)}
+              >
+                CONFIRM RECEIPT ({dispatch.quantity})
+              </button>
+
+              {selectedDispatch?.id === dispatch.id ? (
+                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                  <input
+                    type="number"
+                    className="form-input"
+                    placeholder="Enter counted qty"
+                    value={customReceiptQty}
+                    onChange={(e) => setCustomReceiptQty(e.target.value)}
+                    style={{ padding: '8px', fontSize: '0.9rem' }}
+                  />
+                  <button
+                    className="btn-action"
+                    style={{ background: '#ea580c', color: 'white', padding: '8px 12px', fontSize: '0.9rem' }}
+                    onClick={() => handleConfirmReceipt(dispatch, customReceiptQty)}
+                  >
+                    Save
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  style={{ background: 'none', border: 'none', color: '#c2410c', textDecoration: 'underline', fontSize: '0.85rem', cursor: 'pointer', fontWeight: 700 }}
+                  onClick={() => { setSelectedDispatch(dispatch); setCustomReceiptQty(String(dispatch.quantity)); }}
+                >
+                  Count is different?
+                </button>
+              )}
+            </div>
           </div>
         ))}
 
@@ -163,10 +215,10 @@ export default function StallDashboard({ onLogout }) {
           <button
             className="btn-sell-1"
             onClick={handleSellOne}
-            disabled={selling}
+            disabled={selling || dashboard?.closingSubmitted}
           >
             <span>SELL 1</span>
-            <span className="btn-sell-subtext">₹{dashboard?.product?.selling_price || 40} / glass</span>
+            <span className="btn-sell-subtext">₹40 / glass</span>
           </button>
 
           {toastMessage && (
@@ -174,12 +226,24 @@ export default function StallDashboard({ onLogout }) {
               {toastMessage}
             </div>
           )}
+
+          <div style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              className="btn-action"
+              style={{ background: '#f1f5f9', color: '#475569', fontSize: '0.9rem', width: '100%', padding: '10px' }}
+              onClick={handleUndoLast}
+              disabled={undoing || dashboard?.closingSubmitted}
+            >
+              ↺ UNDO LAST SALE (120s)
+            </button>
+          </div>
         </div>
 
-        {/* Stock Summary Card */}
+        {/* Stock Summary Card (Sold and Received ONLY - No Expected Left) */}
         <div className="card">
-          <div className="card-title">Stock</div>
-          <div className="stock-grid">
+          <div className="card-title">Today's Stock</div>
+          <div className="stock-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
             <div className="stock-item">
               <div className="stock-label">Received</div>
               <div className="stock-value">{dashboard?.stockReceived || 0}</div>
@@ -187,10 +251,6 @@ export default function StallDashboard({ onLogout }) {
             <div className="stock-item">
               <div className="stock-label">Sold</div>
               <div className="stock-value">{dashboard?.soldToday || 0}</div>
-            </div>
-            <div className="stock-item">
-              <div className="stock-label">Expected</div>
-              <div className="stock-value expected">{dashboard?.expectedRemaining || 0}</div>
             </div>
           </div>
         </div>
@@ -200,6 +260,7 @@ export default function StallDashboard({ onLogout }) {
           <button
             className="btn-action btn-wastage"
             onClick={() => setShowWastageModal(true)}
+            disabled={dashboard?.closingSubmitted}
           >
             <span>🗑️ WASTAGE</span>
           </button>
@@ -207,22 +268,10 @@ export default function StallDashboard({ onLogout }) {
           <button
             className="btn-action btn-close-day"
             onClick={() => setShowCloseDayModal(true)}
+            disabled={dashboard?.closingSubmitted}
           >
             <span>📊 CLOSE DAY</span>
           </button>
-        </div>
-
-        {/* Today's Revenue Display */}
-        <div className="revenue-card">
-          <div>
-            <div className="revenue-label">Today's Revenue</div>
-            <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
-              {dashboard?.soldToday || 0} glasses @ ₹{dashboard?.product?.selling_price || 40}
-            </div>
-          </div>
-          <div className="revenue-amount">
-            ₹{(dashboard?.expectedRevenue || 0).toLocaleString()}
-          </div>
         </div>
       </main>
 
@@ -236,7 +285,6 @@ export default function StallDashboard({ onLogout }) {
       <CloseDayModal
         isOpen={showCloseDayModal}
         onClose={() => setShowCloseDayModal(false)}
-        dashboardData={dashboard}
         onSuccess={fetchDashboard}
       />
     </div>

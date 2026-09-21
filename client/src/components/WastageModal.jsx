@@ -9,7 +9,7 @@ export default function WastageModal({ isOpen, onClose, onSuccess }) {
 
   if (!isOpen) return null;
 
-  const handleIncrement = () => setQuantity(prev => prev + 1);
+  const handleIncrement = () => setQuantity(prev => Math.min(200, prev + 1));
   const handleDecrement = () => setQuantity(prev => Math.max(1, prev - 1));
 
   const handleSubmit = async (e) => {
@@ -60,6 +60,7 @@ export default function WastageModal({ isOpen, onClose, onSuccess }) {
               <option value="Spoiled">Spoiled</option>
               <option value="Spilled">Spilled</option>
               <option value="Damaged">Damaged</option>
+              <option value="Free sample">Free sample</option>
               <option value="Other">Other</option>
             </select>
           </div>
