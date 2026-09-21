@@ -48,11 +48,26 @@ async function main() {
   const args = process.argv.slice(2);
   const resetFlag = args.includes('--reset') || args.includes('-Reset');
 
-  const adminEmail = process.env.ADMIN_EMAIL || 'admin@pay.local';
-  const adminPass = process.env.ADMIN_PASSWORD;
+  // Purge legacy demo users if present
+  try {
+    await run("DELETE FROM users WHERE email IN ('admin@test.com', 'stall1@test.com')");
+  } catch (e) {}
 
-  const stallEmail = process.env.STALL_EMAIL || 'stall1@pay.local';
-  const stallPass = process.env.STALL_PASSWORD;
+  const fs = require('fs');
+  const tempCredsFile = 'C:\\payasam-data\\secrets\\temp_creds.json';
+  let creds = {};
+
+  if (fs.existsSync(tempCredsFile)) {
+    try {
+      creds = JSON.parse(fs.readFileSync(tempCredsFile, 'utf8'));
+    } catch (e) {}
+  }
+
+  const adminEmail = (process.env.ADMIN_EMAIL || creds.ADMIN_EMAIL || 'admin@pay.local').trim();
+  const adminPass = (process.env.ADMIN_PASSWORD || creds.ADMIN_PASSWORD || '').trim();
+
+  const stallEmail = (process.env.STALL_EMAIL || creds.STALL_EMAIL || 'stall1@pay.local').trim();
+  const stallPass = (process.env.STALL_PASSWORD || creds.STALL_PASSWORD || '').trim();
 
   if (adminPass) {
     await createOrUpdateUser('System Administrator', adminEmail, adminPass, 'ADMIN', null, resetFlag);

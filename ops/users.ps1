@@ -50,19 +50,28 @@ $digits = ([byte](New-Object byte[] 1 | ForEach-Object { $rng.GetBytes($_); $_ }
 
 $stallPassword = "$($wordList[$w1Idx])-$($wordList[$w2Idx])-$($wordList[$w3Idx])-$digits"
 
+$tempCredsFile = "C:\payasam-data\secrets\temp_creds.json"
+$credsObj = @{
+    ADMIN_EMAIL = "admin@pay.local"
+    ADMIN_PASSWORD = $adminPassword
+    STALL_EMAIL = "stall1@pay.local"
+    STALL_PASSWORD = $stallPassword
+}
+[System.IO.File]::WriteAllText($tempCredsFile, ($credsObj | ConvertTo-Json))
+
 $env:DATA_DIR = $dataDir
 $env:NODE_ENV = "production"
 $env:JWT_SECRET = Get-Content "C:\payasam-data\secrets\jwt_secret.txt" -Raw
-$env:ADMIN_EMAIL = "admin@pay.local"
-$env:ADMIN_PASSWORD = $adminPassword
-$env:STALL_EMAIL = "stall1@pay.local"
-$env:STALL_PASSWORD = $stallPassword
 
 $repoRoot = Resolve-Path "$PSScriptRoot\.."
 $resetArg = if ($Reset) { "--reset" } else { "" }
 
 Write-Host "Creating users for Mode: $Mode in $dataDir..." -ForegroundColor Cyan
-node "$PSScriptRoot\create-users.js" $resetArg
+try {
+    node "$PSScriptRoot\create-users.js" $resetArg
+} finally {
+    if (Test-Path $tempCredsFile) { Remove-Item $tempCredsFile -Force }
+}
 
 Write-Host "`n==================================================" -ForegroundColor Green
 Write-Host "  USERS CREATED FOR MODE: $Mode" -ForegroundColor Green

@@ -10,10 +10,21 @@ const path = require('path');
 const assert = require('assert/strict');
 
 const publicUrl = process.env.PUBLIC_URL || (fs.existsSync('C:\\payasam-data\\current-url.txt') ? fs.readFileSync('C:\\payasam-data\\current-url.txt', 'utf8').trim() : '');
-const adminEmail = process.env.ADMIN_EMAIL;
-const adminPassword = process.env.ADMIN_PASSWORD;
-const stallEmail = process.env.STALL_EMAIL;
-const stallPassword = process.env.STALL_PASSWORD;
+let adminEmail = process.env.ADMIN_EMAIL;
+let adminPassword = process.env.ADMIN_PASSWORD;
+let stallEmail = process.env.STALL_EMAIL;
+let stallPassword = process.env.STALL_PASSWORD;
+
+const tempSmokeFile = 'C:\\payasam-data\\secrets\\temp_smoke.json';
+if ((!adminEmail || !adminPassword || !stallEmail || !stallPassword) && fs.existsSync(tempSmokeFile)) {
+  try {
+    const creds = JSON.parse(fs.readFileSync(tempSmokeFile, 'utf8'));
+    adminEmail = adminEmail || creds.ADMIN_EMAIL;
+    adminPassword = adminPassword || creds.ADMIN_PASSWORD;
+    stallEmail = stallEmail || creds.STALL_EMAIL;
+    stallPassword = stallPassword || creds.STALL_PASSWORD;
+  } catch (e) {}
+}
 
 if (!publicUrl) {
   console.error('ERROR: PUBLIC_URL environment variable or C:\\payasam-data\\current-url.txt is required.');
@@ -21,7 +32,7 @@ if (!publicUrl) {
 }
 
 if (!adminEmail || !adminPassword || !stallEmail || !stallPassword) {
-  console.error('ERROR: ADMIN_EMAIL, ADMIN_PASSWORD, STALL_EMAIL, STALL_PASSWORD environment variables are required.');
+  console.error('ERROR: ADMIN_EMAIL, ADMIN_PASSWORD, STALL_EMAIL, STALL_PASSWORD are required.');
   process.exit(1);
 }
 

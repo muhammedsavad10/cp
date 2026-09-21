@@ -18,14 +18,8 @@ Write-Host "Starting all services for Mode: $Mode..." -ForegroundColor Cyan
 $startScript = "$PSScriptRoot\start.ps1"
 Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-File", "`"$startScript`"", "-Mode", "$Mode" -WindowStyle Hidden
 
-# Launch cloudflared tunnel pointing to 127.0.0.1:5000
-$cloudflaredBin = "C:\payasam-data\bin\cloudflared.exe"
-$tunnelLog = "C:\payasam-data\logs\tunnel.log"
-
-if (Test-Path $cloudflaredBin) {
-    if (Test-Path $tunnelLog) { Remove-Item $tunnelLog -Force }
-    Start-Process -FilePath $cloudflaredBin -ArgumentList "tunnel", "--url", "http://127.0.0.1:5000", "--logfile", "`"$tunnelLog`"" -WindowStyle Hidden
-}
+# Cloudflare fallback notice: If Tailscale is unavailable, cloudflared can be launched manually via:
+# C:\payasam-data\bin\cloudflared.exe tunnel --url http://127.0.0.1:5000 --logfile C:\payasam-data\logs\tunnel.log
 
 Write-Host "Waiting for server (npm run build & node startup)..." -ForegroundColor Yellow
 $up = $false
@@ -46,18 +40,6 @@ if (-not $up) {
     Write-Host "Server is UP and responding on port 5000." -ForegroundColor Green
 }
 
-# Wait 5s for Cloudflare tunnel connection to register
-Start-Sleep -Seconds 5
-
-# Extract public URL from tunnel log
-if (Test-Path $tunnelLog) {
-    $match = Get-Content $tunnelLog | Select-String -Pattern "https://[a-zA-Z0-9-]+\.trycloudflare\.com"
-    if ($match) {
-        $publicUrl = $match.Matches[0].Value
-        [System.IO.File]::WriteAllText("C:\payasam-data\current-url.txt", $publicUrl)
-        Write-Host "Public Tunnel URL: $publicUrl" -ForegroundColor Green
-    }
-}
-
 # Run check
 & "$PSScriptRoot\check.ps1"
+
