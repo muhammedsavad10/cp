@@ -263,9 +263,6 @@ export default function AdminDashboard({ onLogout }) {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-                  <span className={`status-pill ${stall1.status === 'LIVE' ? 'status-pill-green' : 'status-pill-amber'}`}>
-                    {stall1.status === 'LIVE' ? 'Live' : stall1.status === 'CLOSED' ? 'Closed' : stall1.status === 'NOT_STARTED' ? 'Not started' : 'Offline'}
-                  </span>
                   <span className="num">Updated {lastUpdated}s ago</span>
                 </div>
               </div>
