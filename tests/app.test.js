@@ -75,6 +75,10 @@ before(async () => {
   );
   const stall2Res = await request('POST', '/api/auth/login', {}, { email: 'stall2@test.com', password: 'pass123' });
   stall2Token = stall2Res.body.token;
+
+  // Start Day for Stall 1 and Stall 2 in test suite
+  await request('POST', '/api/stall/start-day', { Authorization: `Bearer ${stall1Token}` });
+  await request('POST', '/api/stall/start-day', { Authorization: `Bearer ${stall2Token}` });
 });
 
 test('1. GET /healthz returns 200 OK', async () => {
@@ -106,11 +110,11 @@ test('2. Idempotency: same key twice returns 200 & 1 row; two different keys 500
   assert.equal(salesKey2.length, 1);
 });
 
-test('3. Undo allowed <= 120s and rejected after > 120s', async () => {
+test('3. Undo allowed <= 15s and rejected after > 15s', async () => {
   const today = getISTBusinessDate();
-  const utcOld = new Date(Date.now() - 130 * 1000).toISOString();
+  const utcOld = new Date(Date.now() - 20 * 1000).toISOString();
 
-  // Insert a sale created 130 seconds ago
+  // Insert a sale created 20 seconds ago
   await run(
     `INSERT INTO sales (stall_id, product_id, quantity, selling_price, created_at, created_by, business_date, idempotency_key)
      VALUES (1, 1, 1, 40.0, ?, 2, ?, ?)`,
@@ -125,7 +129,7 @@ test('3. Undo allowed <= 120s and rejected after > 120s', async () => {
   const undoRes1 = await request('POST', '/api/stall/undo-last', { Authorization: `Bearer ${stall1Token}` });
   assert.equal(undoRes1.status, 200);
 
-  // Second undo attempts to reverse the 130s old sale -> fails (expired window)
+  // Second undo attempts to reverse the 20s old sale -> fails (expired window > 15s)
   const undoRes2 = await request('POST', '/api/stall/undo-last', { Authorization: `Bearer ${stall1Token}` });
   assert.equal(undoRes2.status, 400);
   assert.match(undoRes2.body.error, /expired/i);
@@ -198,13 +202,31 @@ test('6. Cross-Stall Isolation: Stall 1 token cannot access or modify Stall 2 da
   assert.equal(confirmRes.status, 404);
 });
 
-test('7. Blind Closing math & Second closing returns 409 Conflict', async () => {
+test('7. Semi-Blind Closing math & Wrong revenue returns generic 409 without leaking expected/actual', async () => {
   const today = getISTBusinessDate();
 
+  // Get total sold today for stall 1
+  const salesRow = await get(`SELECT COALESCE(SUM(quantity), 0) as total FROM sales WHERE stall_id = 1 AND business_date = ?`, [today]);
+  const totalSold = salesRow ? salesRow.total : 0;
+  const expectedRev = totalSold * 40;
+
+  // Attempt closing with WRONG revenue (expectedRev + 100) -> fails with generic 409
+  const wrongClose = await request('POST', '/api/stall/close-day', { Authorization: `Bearer ${stall1Token}` }, {
+    cash_received: expectedRev,
+    upi_received: 100
+  });
+
+  assert.equal(wrongClose.status, 409);
+  assert.equal(wrongClose.body.error, "Amount doesn't match. Please recheck and re-enter.");
+  // Verify NO numbers are leaked in response body
+  assert.equal(wrongClose.body.expected_revenue, undefined);
+  assert.equal(wrongClose.body.actual_revenue, undefined);
+  assert.equal(wrongClose.body.difference, undefined);
+
+  // Attempt closing with EXACT correct revenue -> succeeds
   const close1 = await request('POST', '/api/stall/close-day', { Authorization: `Bearer ${stall1Token}` }, {
-    actual_remaining: 10,
-    cash_received: 400,
-    upi_received: 200
+    cash_received: expectedRev,
+    upi_received: 0
   });
 
   assert.equal(close1.status, 200);
@@ -212,9 +234,8 @@ test('7. Blind Closing math & Second closing returns 409 Conflict', async () => 
 
   // Second closing returns 409
   const close2 = await request('POST', '/api/stall/close-day', { Authorization: `Bearer ${stall1Token}` }, {
-    actual_remaining: 10,
-    cash_received: 400,
-    upi_received: 200
+    cash_received: expectedRev,
+    upi_received: 0
   });
 
   assert.equal(close2.status, 409);
@@ -228,7 +249,7 @@ test('8. Undo & Sale blocked after close (409 DAY_CLOSED)', async () => {
   assert.equal(undoRes.status, 409);
 });
 
-test('9. Admin Reopen Day allows sales again', async () => {
+test('9. Admin Reopen Day allows sales again & re-marks session active', async () => {
   const today = getISTBusinessDate();
 
   const reopenRes = await request('POST', '/api/admin/reopen-day', { Authorization: `Bearer ${adminToken}` }, {
@@ -274,6 +295,32 @@ test('12. Same results under TZ=UTC and TZ=Asia/Kolkata', () => {
   const utcDate = new Date('2026-09-21T18:35:00Z');
   const istDateStr = getISTBusinessDate(utcDate);
   assert.equal(istDateStr, '2026-09-22');
+});
+
+test('13. T1.5-1: Start Day enforcement (sell before start-day returns 409 DAY_NOT_STARTED)', async () => {
+  // Create Stall 3 without starting day
+  await run(`INSERT INTO stalls (id, name, active) VALUES (3, 'Stall 3', 1)`);
+  const bcrypt = require('bcryptjs');
+  const passHash = await bcrypt.hash('pass123', 10);
+  await run(
+    `INSERT INTO users (name, email, password, role, stall_id) VALUES ('Stall 3 Worker', 'stall3@test.com', ?, 'STALL_USER', 3)`,
+    [passHash]
+  );
+  const stall3Res = await request('POST', '/api/auth/login', {}, { email: 'stall3@test.com', password: 'pass123' });
+  const stall3Token = stall3Res.body.token;
+
+  // Sell attempt before Start Day -> 409 DAY_NOT_STARTED
+  const sellRes = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall3Token}` }, { idempotency_key: `s3_key_${Date.now()}` });
+  assert.equal(sellRes.status, 409);
+  assert.equal(sellRes.body.error, 'DAY_NOT_STARTED');
+
+  // Start Day -> 200 OK
+  const startRes = await request('POST', '/api/stall/start-day', { Authorization: `Bearer ${stall3Token}` });
+  assert.equal(startRes.status, 200);
+
+  // Sell attempt after Start Day -> 200 OK
+  const sellRes2 = await request('POST', '/api/stall/sell', { Authorization: `Bearer ${stall3Token}` }, { idempotency_key: `s3_key_${Date.now()}` });
+  assert.equal(sellRes2.status, 200);
 });
 
 after(async () => {

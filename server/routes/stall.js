@@ -7,6 +7,32 @@ const { broadcastEvent } = require('../websocket');
 router.use(authenticateToken);
 router.use(requireRole('STALL_USER'));
 
+// Middleware to enforce active day session before performing actions
+async function requireActiveSession(req, res, next) {
+  try {
+    const stallId = req.user.stall_id || 1;
+    const today = getISTBusinessDate();
+
+    const activeSession = await get(
+      `SELECT id FROM stall_sessions WHERE stall_id = ? AND business_date = ? AND status = 'ACTIVE'`,
+      [stallId, today]
+    );
+
+    if (!activeSession) {
+      return res.status(409).json({
+        error: 'DAY_NOT_STARTED',
+        message: 'Day has not been started yet. Please tap Start Day.'
+      });
+    }
+
+    req.activeSession = activeSession;
+    next();
+  } catch (err) {
+    console.error('Session check error:', err);
+    return res.status(500).json({ error: 'Failed to verify stall session' });
+  }
+}
+
 // GET /api/stall/dashboard
 router.get('/dashboard', async (req, res) => {
   try {
@@ -16,7 +42,14 @@ router.get('/dashboard', async (req, res) => {
     const stall = await get('SELECT * FROM stalls WHERE id = ?', [stallId]);
     const product = await get('SELECT * FROM products WHERE id = 1');
 
-    // Received stock today (dispatches received on today's IST business date)
+    // Session check for dayStarted
+    const activeSession = await get(
+      `SELECT * FROM stall_sessions WHERE stall_id = ? AND business_date = ? AND status = 'ACTIVE'`,
+      [stallId, today]
+    );
+    const dayStarted = !!activeSession;
+
+    // Received stock today
     const receivedRow = await get(
       `SELECT COALESCE(SUM(COALESCE(received_quantity, quantity)), 0) as total 
        FROM stock_dispatches 
@@ -25,7 +58,7 @@ router.get('/dashboard', async (req, res) => {
     );
     const stockReceived = receivedRow ? receivedRow.total : 0;
 
-    // Sales count today (net sum of quantity, taking reversals into account)
+    // Sales count today
     const salesRow = await get(
       `SELECT COALESCE(SUM(quantity), 0) as total 
        FROM sales 
@@ -43,16 +76,10 @@ router.get('/dashboard', async (req, res) => {
     );
     const wastageToday = wastageRow ? wastageRow.total : 0;
 
-    // Expected revenue = sum of quantity * selling_price stored on each sale
-    const revenueRow = await get(
-      `SELECT COALESCE(SUM(quantity * selling_price), 0) as total 
-       FROM sales 
-       WHERE stall_id = ? AND business_date = ?`,
-      [stallId, today]
-    );
-    const expectedRevenue = revenueRow ? revenueRow.total : 0;
+    // Computed remaining stock (informational read-only)
+    const computedRemaining = stockReceived - soldToday - wastageToday;
 
-    // Pending stock dispatches of ANY age stay visible until confirmed
+    // Pending stock dispatches
     const pendingDispatches = await all(
       `SELECT d.*, u.name as dispatched_by_name 
        FROM stock_dispatches d 
@@ -72,9 +99,11 @@ router.get('/dashboard', async (req, res) => {
       today,
       stall,
       product,
+      dayStarted,
       stockReceived,
       soldToday,
       wastageToday,
+      computedRemaining,
       pendingDispatches,
       closingSubmitted: !!closing
     });
@@ -84,8 +113,46 @@ router.get('/dashboard', async (req, res) => {
   }
 });
 
+// POST /api/stall/start-day
+router.post('/start-day', async (req, res) => {
+  try {
+    const stallId = req.user.stall_id || 1;
+    const today = getISTBusinessDate();
+    const utcTimestamp = getUTCTimestamp();
+
+    const existingSession = await get(
+      `SELECT id FROM stall_sessions WHERE stall_id = ? AND business_date = ? AND status = 'ACTIVE'`,
+      [stallId, today]
+    );
+
+    if (existingSession) {
+      return res.json({ success: true, message: 'Day already started', session_id: existingSession.id });
+    }
+
+    await run(
+      `INSERT INTO stall_sessions (stall_id, business_date, started_at, started_by, status)
+       VALUES (?, ?, ?, ?, 'ACTIVE')`,
+      [stallId, today, utcTimestamp, req.user.id]
+    );
+
+    // Broadcast WS event for Day Started
+    broadcastEvent('STALL_ACTION', {
+      eventType: 'DAY_STARTED',
+      stall_id: stallId,
+      stall_name: `Stall ${stallId}`,
+      created_at: utcTimestamp,
+      text: `Stall ${stallId} worker started day`
+    });
+
+    return res.json({ success: true, message: 'Day started' });
+  } catch (err) {
+    console.error('Start day error:', err);
+    return res.status(500).json({ error: 'Failed to start day' });
+  }
+});
+
 // POST /api/stall/sell
-router.post('/sell', async (req, res) => {
+router.post('/sell', requireActiveSession, async (req, res) => {
   try {
     const stallId = req.user.stall_id || 1;
     const today = getISTBusinessDate();
@@ -108,7 +175,7 @@ router.post('/sell', async (req, res) => {
       });
     }
 
-    // Idempotency check: if key already exists, return original sale response (200 OK)
+    // Idempotency check
     const existingSale = await get('SELECT * FROM sales WHERE idempotency_key = ?', [idempotency_key]);
     if (existingSale) {
       const salesRow = await get(
@@ -127,14 +194,12 @@ router.post('/sell', async (req, res) => {
     const sellingPrice = product ? product.selling_price : 40.0;
     const utcTimestamp = getUTCTimestamp();
 
-    // Insert sale record
     await run(
       `INSERT INTO sales (stall_id, product_id, quantity, selling_price, created_at, created_by, business_date, idempotency_key)
        VALUES (?, 1, 1, ?, ?, ?, ?, ?)`,
       [stallId, sellingPrice, utcTimestamp, req.user.id, today, idempotency_key]
     );
 
-    // Calculate updated stock and revenue
     const salesRow = await get(
       `SELECT COALESCE(SUM(quantity), 0) as total FROM sales WHERE stall_id = ? AND business_date = ?`,
       [stallId, today]
@@ -156,7 +221,6 @@ router.post('/sell', async (req, res) => {
     const expectedRemaining = stockReceived - soldToday - wastageToday;
     const warning = expectedRemaining <= 0 ? 'No stock recorded. Confirm receipt or tell admin.' : null;
 
-    // Broadcast Real-Time Event
     broadcastEvent('STALL_ACTION', {
       eventType: 'SALE',
       stall_id: stallId,
@@ -171,8 +235,6 @@ router.post('/sell', async (req, res) => {
     return res.json({
       success: true,
       soldToday,
-      expectedRemaining,
-      expectedRevenue: soldToday * sellingPrice,
       warning
     });
   } catch (err) {
@@ -181,13 +243,12 @@ router.post('/sell', async (req, res) => {
   }
 });
 
-// POST /api/stall/undo-last
-router.post('/undo-last', async (req, res) => {
+// POST /api/stall/undo-last (15-second server cutoff)
+router.post('/undo-last', requireActiveSession, async (req, res) => {
   try {
     const stallId = req.user.stall_id || 1;
     const today = getISTBusinessDate();
 
-    // Check if day is closed
     const activeClosing = await get(
       `SELECT id FROM daily_closings WHERE stall_id = ? AND business_date = ? AND status = 'ACTIVE'`,
       [stallId, today]
@@ -200,7 +261,6 @@ router.post('/undo-last', async (req, res) => {
       });
     }
 
-    // Find most recent un-reversed sale of today
     const lastSale = await get(
       `SELECT * FROM sales 
        WHERE stall_id = ? AND business_date = ? AND quantity = 1 
@@ -213,26 +273,24 @@ router.post('/undo-last', async (req, res) => {
       return res.status(400).json({ error: 'No eligible sale to undo for today.' });
     }
 
-    // Verify age <= 120 seconds
+    // Verify age <= 15 seconds (T1.5-3 requirement)
     const saleTime = new Date(lastSale.created_at).getTime();
     const nowTime = Date.now();
     const ageSeconds = (nowTime - saleTime) / 1000;
 
-    if (ageSeconds > 120) {
-      return res.status(400).json({ error: 'Undo window expired (must be within 120 seconds of sale).' });
+    if (ageSeconds > 15) {
+      return res.status(400).json({ error: 'Undo window expired (must be within 15 seconds of sale).' });
     }
 
     const utcTimestamp = getUTCTimestamp();
     const undoIdempotencyKey = `undo_${lastSale.id}_${nowTime}`;
 
-    // Insert reversal row
     await run(
       `INSERT INTO sales (stall_id, product_id, quantity, selling_price, created_at, created_by, business_date, idempotency_key, reversal_of, reversal_reason)
        VALUES (?, ?, -1, ?, ?, ?, ?, ?, ?, ?)`,
       [stallId, lastSale.product_id, lastSale.selling_price, utcTimestamp, req.user.id, today, undoIdempotencyKey, lastSale.id, 'Stall undo']
     );
 
-    // Broadcast Real-Time Event
     broadcastEvent('STALL_ACTION', {
       eventType: 'UNDO_SALE',
       stall_id: stallId,
@@ -253,7 +311,7 @@ router.post('/undo-last', async (req, res) => {
 });
 
 // POST /api/stall/confirm-receipt
-router.post('/confirm-receipt', async (req, res) => {
+router.post('/confirm-receipt', requireActiveSession, async (req, res) => {
   try {
     const stallId = req.user.stall_id || 1;
     const today = getISTBusinessDate();
@@ -288,7 +346,6 @@ router.post('/confirm-receipt', async (req, res) => {
     const isVariance = finalReceivedQty !== dispatch.quantity;
     const varianceType = finalReceivedQty < dispatch.quantity ? `SHORT ${dispatch.quantity - finalReceivedQty}` : `MORE ${finalReceivedQty - dispatch.quantity}`;
 
-    // Broadcast Real-Time Event
     broadcastEvent('STALL_ACTION', {
       eventType: 'RECEIPT',
       stall_id: stallId,
@@ -314,7 +371,7 @@ router.post('/confirm-receipt', async (req, res) => {
 });
 
 // POST /api/stall/wastage
-router.post('/wastage', async (req, res) => {
+router.post('/wastage', requireActiveSession, async (req, res) => {
   try {
     const stallId = req.user.stall_id || 1;
     const today = getISTBusinessDate();
@@ -330,7 +387,6 @@ router.post('/wastage', async (req, res) => {
       return res.status(400).json({ error: 'Invalid wastage reason. Allowed: ' + validReasons.join(', ') });
     }
 
-    // Check if day is closed
     const activeClosing = await get(
       `SELECT id FROM daily_closings WHERE stall_id = ? AND business_date = ? AND status = 'ACTIVE'`,
       [stallId, today]
@@ -351,7 +407,6 @@ router.post('/wastage', async (req, res) => {
       [stallId, qty, reason, utcTimestamp, req.user.id, today]
     );
 
-    // Check if total wastage today > 10% of total stock received today
     const receivedRow = await get(
       `SELECT COALESCE(SUM(COALESCE(received_quantity, quantity)), 0) as total FROM stock_dispatches WHERE stall_id = ? AND status = 'RECEIVED' AND received_business_date = ?`,
       [stallId, today]
@@ -366,7 +421,6 @@ router.post('/wastage', async (req, res) => {
 
     const isLargeWastage = stockReceived > 0 && totalWastageToday > 0.10 * stockReceived;
 
-    // Broadcast Real-Time Event
     broadcastEvent('STALL_ACTION', {
       eventType: 'WASTAGE',
       stall_id: stallId,
@@ -387,23 +441,22 @@ router.post('/wastage', async (req, res) => {
   }
 });
 
-// POST /api/stall/close-day
-router.post('/close-day', async (req, res) => {
+// POST /api/stall/close-day (Semi-Blind with Generic Mismatch Warning)
+router.post('/close-day', requireActiveSession, async (req, res) => {
   try {
     const stallId = req.user.stall_id || 1;
     const today = getISTBusinessDate();
+    const utcTimestamp = getUTCTimestamp();
 
-    const { actual_remaining, cash_received, upi_received } = req.body;
+    const { cash_received, upi_received } = req.body;
 
-    const actualRem = Number(actual_remaining);
     const cash = Number(cash_received);
     const upi = Number(upi_received);
 
-    if (isNaN(actualRem) || isNaN(cash) || isNaN(upi) || cash < 0 || upi < 0) {
-      return res.status(400).json({ error: 'Valid non-negative numbers are required for actual remaining, cash, and UPI.' });
+    if (isNaN(cash) || isNaN(upi) || cash < 0 || upi < 0) {
+      return res.status(400).json({ error: 'Valid non-negative numbers are required for cash and UPI.' });
     }
 
-    // Check if active closing already exists for today
     const existingClosing = await get(
       `SELECT id FROM daily_closings WHERE stall_id = ? AND business_date = ? AND status = 'ACTIVE'`,
       [stallId, today]
@@ -413,18 +466,53 @@ router.post('/close-day', async (req, res) => {
       return res.status(409).json({ error: 'Daily closing has already been submitted for today.' });
     }
 
-    // Calculate SNAPSHOT values
-    const receivedRow = await get(
-      `SELECT COALESCE(SUM(COALESCE(received_quantity, quantity)), 0) as total FROM stock_dispatches WHERE stall_id = ? AND status = 'RECEIVED' AND received_business_date = ?`,
-      [stallId, today]
-    );
-    const receivedTotal = receivedRow ? receivedRow.total : 0;
-
     const salesRow = await get(
       `SELECT COALESCE(SUM(quantity), 0) as total FROM sales WHERE stall_id = ? AND business_date = ?`,
       [stallId, today]
     );
     const soldTotal = salesRow ? salesRow.total : 0;
+
+    // Expected revenue = sold_today * 40 (wastage does NOT reduce expected revenue)
+    const expectedRevenue = soldTotal * 40.0;
+    const totalReceived = cash + upi;
+
+    // IF AMOUNT DOES NOT MATCH EXPECTED REVENUE EXACTLY:
+    if (totalReceived !== expectedRevenue) {
+      // Log failed attempt in closing_attempts
+      await run(
+        `INSERT INTO closing_attempts (stall_id, business_date, attempted_at, cash_received, upi_received)
+         VALUES (?, ?, ?, ?, ?)`,
+        [stallId, today, utcTimestamp, cash, upi]
+      );
+
+      // Broadcast WS event to Admin (without amounts)
+      const attemptsRow = await get(
+        `SELECT COUNT(*) as cnt FROM closing_attempts WHERE stall_id = ? AND business_date = ?`,
+        [stallId, today]
+      );
+      const attemptCount = attemptsRow ? attemptsRow.cnt : 1;
+
+      broadcastEvent('STALL_ACTION', {
+        eventType: 'FAILED_CLOSING_ATTEMPT',
+        stall_id: stallId,
+        stall_name: `Stall ${stallId}`,
+        attempt_count: attemptCount,
+        created_at: utcTimestamp,
+        text: `Closing attempt failed (${attemptCount} total today)`
+      });
+
+      // Return generic 409 with NO leaked expected/actual/difference figures
+      return res.status(409).json({
+        error: "Amount doesn't match. Please recheck and re-enter."
+      });
+    }
+
+    // ON SUCCESSFUL MATCH:
+    const receivedRow = await get(
+      `SELECT COALESCE(SUM(COALESCE(received_quantity, quantity)), 0) as total FROM stock_dispatches WHERE stall_id = ? AND status = 'RECEIVED' AND received_business_date = ?`,
+      [stallId, today]
+    );
+    const receivedTotal = receivedRow ? receivedRow.total : 0;
 
     const wastageRow = await get(
       `SELECT COALESCE(SUM(quantity), 0) as total FROM wastages WHERE stall_id = ? AND business_date = ?`,
@@ -432,49 +520,36 @@ router.post('/close-day', async (req, res) => {
     );
     const wastageTotal = wastageRow ? wastageRow.total : 0;
 
-    const revenueRow = await get(
-      `SELECT COALESCE(SUM(quantity * selling_price), 0) as total FROM sales WHERE stall_id = ? AND business_date = ?`,
-      [stallId, today]
-    );
-    const expectedRevenue = revenueRow ? revenueRow.total : 0;
+    const computedRemaining = receivedTotal - soldTotal - wastageTotal;
 
-    const expectedRemaining = receivedTotal - soldTotal - wastageTotal;
-    const stockVariance = actualRem - expectedRemaining;
-    const stockVarianceValue = stockVariance * 40.0;
-    const totalReceived = cash + upi;
-    const moneyDifference = totalReceived - expectedRevenue;
-
-    const stockStatus = stockVariance === 0 ? 'MATCHED' : stockVariance < 0 ? 'SHORT' : 'EXTRA';
-    const moneyStatus = moneyDifference === 0 ? 'MATCHED' : moneyDifference < 0 ? 'SHORT' : 'EXTRA';
-
-    const utcTimestamp = getUTCTimestamp();
-
+    // Submit closing as ACTIVE
     await run(
       `INSERT INTO daily_closings (
         stall_id, business_date, actual_remaining, cash_received, upi_received,
         received_total, sold_total, wastage_total, expected_remaining, expected_revenue,
         stock_variance, stock_variance_value, money_difference, stock_status, money_status,
         status, submitted_at, submitted_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0.0, 0.0, 'MATCHED', 'MATCHED', 'ACTIVE', ?, ?)`,
       [
-        stallId, today, actualRem, cash, upi,
-        receivedTotal, soldTotal, wastageTotal, expectedRemaining, expectedRevenue,
-        stockVariance, stockVarianceValue, moneyDifference, stockStatus, moneyStatus,
+        stallId, today, computedRemaining, cash, upi,
+        receivedTotal, soldTotal, wastageTotal, computedRemaining, expectedRevenue,
         utcTimestamp, req.user.id
       ]
     );
 
-    // Broadcast Real-Time Event
+    // Mark session as CLOSED
+    await run(
+      `UPDATE stall_sessions SET status = 'CLOSED' WHERE stall_id = ? AND business_date = ? AND status = 'ACTIVE'`,
+      [stallId, today]
+    );
+
     broadcastEvent('STALL_ACTION', {
       eventType: 'CLOSE_DAY',
       stall_id: stallId,
       stall_name: `Stall ${stallId}`,
-      stock_status: stockStatus,
-      money_status: moneyStatus,
-      stock_variance: stockVariance,
-      money_difference: moneyDifference,
+      money_status: 'MATCHED',
       created_at: utcTimestamp,
-      text: `Stall ${stallId} submitted daily closing (Stock: ${stockStatus}, Money: ${moneyStatus})`
+      text: `Stall ${stallId} submitted daily closing (Money: MATCHED)`
     });
 
     return res.json({

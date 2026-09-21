@@ -46,6 +46,7 @@ export const api = {
 
   // Stall Worker
   getStallDashboard: () => fetchAPI('/stall/dashboard'),
+  startDay: () => fetchAPI('/stall/start-day', { method: 'POST' }),
   sellOne: (idempotency_key) => fetchAPI('/stall/sell', { method: 'POST', body: JSON.stringify({ idempotency_key }) }),
   confirmReceipt: (dispatch_id, received_quantity) => fetchAPI('/stall/confirm-receipt', { method: 'POST', body: JSON.stringify({ dispatch_id, received_quantity }) }),
   undoLastSale: () => fetchAPI('/stall/undo-last', { method: 'POST' }),

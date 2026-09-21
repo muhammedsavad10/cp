@@ -171,6 +171,36 @@ const initDb = async () => {
       WHERE status = 'ACTIVE'
     `);
 
+    // Stall Sessions (Day Lifecycle)
+    await run(`
+      CREATE TABLE IF NOT EXISTS stall_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        stall_id INTEGER NOT NULL REFERENCES stalls(id),
+        business_date TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        started_by INTEGER NOT NULL REFERENCES users(id),
+        status TEXT CHECK(status IN ('ACTIVE', 'CLOSED')) DEFAULT 'ACTIVE'
+      )
+    `);
+
+    await run(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_stall_sessions_active 
+      ON stall_sessions(stall_id, business_date) 
+      WHERE status = 'ACTIVE'
+    `);
+
+    // Closing Attempts Audit Log
+    await run(`
+      CREATE TABLE IF NOT EXISTS closing_attempts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        stall_id INTEGER NOT NULL REFERENCES stalls(id),
+        business_date TEXT NOT NULL,
+        attempted_at TEXT NOT NULL,
+        cash_received REAL NOT NULL,
+        upi_received REAL NOT NULL
+      )
+    `);
+
     // Triggers for Ledger Integrity
     await run(`
       CREATE TRIGGER IF NOT EXISTS prevent_sales_update 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Wifi, WifiOff, Package, Check, RotateCcw, Trash2, CalendarCheck, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Wifi, WifiOff, Package, Check, RotateCcw, Trash2, CalendarCheck, AlertTriangle, RefreshCw, PlayCircle } from 'lucide-react';
 import { api } from '../api';
 import { useWebSocket } from '../useWebSocket';
 import Navbar from '../components/Navbar';
@@ -76,7 +76,7 @@ export default function StallDashboard({ onLogout }) {
     return () => clearInterval(interval);
   }, [fetchDashboard]);
 
-  // Undo Timer countdown (120s window)
+  // Undo Timer countdown (10s UI window)
   useEffect(() => {
     if (undoTimeLeft > 0) {
       undoTimerRef.current = setInterval(() => {
@@ -86,8 +86,17 @@ export default function StallDashboard({ onLogout }) {
     return () => clearInterval(undoTimerRef.current);
   }, [undoTimeLeft]);
 
+  const handleStartDay = async () => {
+    try {
+      await api.startDay();
+      fetchDashboard();
+    } catch (err) {
+      setError(err.message || 'Failed to start day');
+    }
+  };
+
   const handleSellOne = async () => {
-    if (selling || dashboard?.closingSubmitted) return;
+    if (selling || dashboard?.closingSubmitted || !dashboard?.dayStarted) return;
     setSelling(true);
 
     // Haptic feedback (30ms vibration)
@@ -107,11 +116,11 @@ export default function StallDashboard({ onLogout }) {
 
       const now = new Date();
       setLastSaleTime(now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-      setUndoTimeLeft(120);
+      setUndoTimeLeft(10); // 10s UI window
       setError('');
       fetchDashboard();
     } catch (err) {
-      setError('Not saved. Tap again, or note it on paper.');
+      setError(err.message || 'Not saved. Tap again, or note it on paper.');
     } finally {
       setTimeout(() => setSelling(false), 200);
     }
@@ -175,18 +184,22 @@ export default function StallDashboard({ onLogout }) {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)' }}>
-            <span className={`status-pill ${isConnected ? 'status-pill-green' : 'status-pill-red'}`}>
-              {isConnected ? <Wifi size={14} strokeWidth={2} /> : <WifiOff size={14} strokeWidth={2} />}
-              <span>{isConnected ? 'Live' : 'Offline'}</span>
+            <span className={`status-pill ${!dashboard?.dayStarted ? 'status-pill-amber' : dashboard?.closingSubmitted ? 'status-pill-amber' : isConnected ? 'status-pill-green' : 'status-pill-red'}`}>
+              {!dashboard?.dayStarted ? (
+                <span>Not started</span>
+              ) : dashboard?.closingSubmitted ? (
+                <span>Closed</span>
+              ) : (
+                <>
+                  {isConnected ? <Wifi size={14} strokeWidth={2} /> : <WifiOff size={14} strokeWidth={2} />}
+                  <span>{isConnected ? 'Live' : 'Offline'}</span>
+                </>
+              )}
             </span>
-
-            {dashboard?.closingSubmitted && (
-              <span className="status-pill status-pill-amber">Closed</span>
-            )}
           </div>
         </div>
 
-        {/* State 6: Persistent Plain Banner for Failed Sale / Offline */}
+        {/* Banner for Error / Status */}
         {error && (
           <div className="card" style={{ borderLeft: '4px solid var(--status-red)', backgroundColor: 'var(--status-red-bg)', color: 'var(--status-red)', padding: 'var(--spacing-3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--spacing-2)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', fontSize: '0.9375rem', fontWeight: 600 }}>
@@ -205,64 +218,26 @@ export default function StallDashboard({ onLogout }) {
           </div>
         )}
 
-        {/* State 1: Pending Stock Cards */}
-        {pendingDispatches.map((dispatch) => (
-          <div key={dispatch.id} className="card" style={{ borderLeft: '4px solid var(--brand-accent)', backgroundColor: 'var(--status-amber-bg)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', marginBottom: 'var(--spacing-2)' }}>
-              <Package size={20} strokeWidth={1.5} style={{ color: 'var(--brand-accent)' }} />
-              <strong style={{ fontSize: '1rem' }}>Stock Dispatched</strong>
+        {/* Day Not Started Screen */}
+        {!dashboard?.dayStarted ? (
+          <div className="card" style={{ textAlign: 'center', padding: 'var(--spacing-6) var(--spacing-4)', marginTop: 'var(--spacing-4)' }}>
+            <div style={{ width: 56, height: 56, borderRadius: 'var(--radius-full)', backgroundColor: 'var(--status-amber-bg)', color: 'var(--brand-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto var(--spacing-3)' }}>
+              <PlayCircle size={32} strokeWidth={1.5} />
             </div>
-
-            <p style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: 'var(--spacing-3)' }} className="num">
-              Stock sent: {dispatch.quantity} glasses
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: 'var(--spacing-2)' }}>Start Day</h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9375rem', marginBottom: 'var(--spacing-6)' }}>
+              Press Start Day to begin recording sales for Stall 1 today.
             </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)' }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => handleConfirmReceipt(dispatch, dispatch.quantity)}
-              >
-                <Check size={18} strokeWidth={1.5} />
-                <span>Confirm Receipt</span>
-              </button>
-
-              {selectedDispatch?.id === dispatch.id ? (
-                <div style={{ display: 'flex', gap: 'var(--spacing-2)', marginTop: 'var(--spacing-2)' }}>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    className="input-large num"
-                    style={{ minHeight: '44px', fontSize: '1rem' }}
-                    placeholder="Enter count"
-                    value={customReceiptQty}
-                    onChange={(e) => setCustomReceiptQty(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    style={{ minHeight: '44px' }}
-                    onClick={() => handleConfirmReceipt(dispatch, customReceiptQty)}
-                  >
-                    Save
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-quiet"
-                  style={{ fontSize: '0.875rem' }}
-                  onClick={() => { setSelectedDispatch(dispatch); setCustomReceiptQty(String(dispatch.quantity)); }}
-                >
-                  Count is different?
-                </button>
-              )}
-            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ width: '100%', minHeight: '52px', fontSize: '1.125rem' }}
+              onClick={handleStartDay}
+            >
+              Start Day
+            </button>
           </div>
-        ))}
-
-        {/* State 5 / State 2: Worker Selling Screen */}
-        {dashboard?.closingSubmitted ? (
+        ) : dashboard?.closingSubmitted ? (
           /* Closed Day View for Stall Worker */
           <div className="card" style={{ textAlign: 'center', padding: 'var(--spacing-6) var(--spacing-4)', marginTop: 'var(--spacing-4)' }}>
             <div style={{ width: 56, height: 56, borderRadius: 'var(--radius-full)', backgroundColor: 'var(--status-green-bg)', color: 'var(--status-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto var(--spacing-3)' }}>
@@ -276,6 +251,62 @@ export default function StallDashboard({ onLogout }) {
         ) : (
           /* Active Selling View */
           <div>
+            {/* Pending Stock Cards */}
+            {pendingDispatches.map((dispatch) => (
+              <div key={dispatch.id} className="card" style={{ borderLeft: '4px solid var(--brand-accent)', backgroundColor: 'var(--status-amber-bg)', marginBottom: 'var(--spacing-3)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', marginBottom: 'var(--spacing-2)' }}>
+                  <Package size={20} strokeWidth={1.5} style={{ color: 'var(--brand-accent)' }} />
+                  <strong style={{ fontSize: '1rem' }}>Stock Dispatched</strong>
+                </div>
+
+                <p style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: 'var(--spacing-3)' }} className="num">
+                  Stock sent: {dispatch.quantity} glasses
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => handleConfirmReceipt(dispatch, dispatch.quantity)}
+                  >
+                    <Check size={18} strokeWidth={1.5} />
+                    <span>Confirm Receipt</span>
+                  </button>
+
+                  {selectedDispatch?.id === dispatch.id ? (
+                    <div style={{ display: 'flex', gap: 'var(--spacing-2)', marginTop: 'var(--spacing-2)' }}>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        className="input-large num"
+                        style={{ minHeight: '44px', fontSize: '1rem' }}
+                        placeholder="Enter count"
+                        value={customReceiptQty}
+                        onChange={(e) => setCustomReceiptQty(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ minHeight: '44px' }}
+                        onClick={() => handleConfirmReceipt(dispatch, customReceiptQty)}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-quiet"
+                      style={{ fontSize: '0.875rem' }}
+                      onClick={() => { setSelectedDispatch(dispatch); setCustomReceiptQty(String(dispatch.quantity)); }}
+                    >
+                      Count is different?
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+
             {/* Today's Sold Count Hero */}
             <div className="hero-sold-container">
               <div className="hero-sold-label">Glasses Sold Today</div>
@@ -308,7 +339,7 @@ export default function StallDashboard({ onLogout }) {
               <span>{lastSaleTime ? `Last sale ${lastSaleTime}` : 'No sales yet'}</span>
             </div>
 
-            {/* 2-Minute Shrinking Countdown for Undo Last Sale */}
+            {/* 10-Second Countdown for Undo Last Sale (Visually hidden after 10s) */}
             {undoTimeLeft > 0 && (
               <div className="undo-container">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -323,7 +354,7 @@ export default function StallDashboard({ onLogout }) {
                     <span>Undo Last Sale ({undoTimeLeft}s)</span>
                   </button>
                 </div>
-                <div className="undo-progress-bar" style={{ width: `${(undoTimeLeft / 120) * 100}%` }} />
+                <div className="undo-progress-bar" style={{ width: `${(undoTimeLeft / 10) * 100}%` }} />
               </div>
             )}
 
@@ -362,6 +393,7 @@ export default function StallDashboard({ onLogout }) {
         isOpen={showCloseDayModal}
         onClose={() => setShowCloseDayModal(false)}
         onSuccess={fetchDashboard}
+        computedRemaining={dashboard?.computedRemaining}
       />
     </div>
   );

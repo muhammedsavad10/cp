@@ -84,7 +84,29 @@ router.get('/dashboard', async (req, res) => {
       [today]
     );
 
+    // Active or latest session for today
+    const activeSession = await get(
+      `SELECT * FROM stall_sessions WHERE stall_id = 1 AND business_date = ? AND status = 'ACTIVE'`,
+      [today]
+    );
+    const latestSession = await get(
+      `SELECT * FROM stall_sessions WHERE stall_id = 1 AND business_date = ? ORDER BY id DESC LIMIT 1`,
+      [today]
+    );
+
+    const dayStarted = !!activeSession;
+    const dayClosed = !!closing;
+
     const connStatus = getStallStatus(1);
+
+    // State machine status calculation:
+    // NOT_STARTED -> LIVE (started + open + websocket connected) -> OFFLINE (started + open + websocket disconnected) -> CLOSED (closed)
+    let stateMachineStatus = 'NOT_STARTED';
+    if (dayClosed) {
+      stateMachineStatus = 'CLOSED';
+    } else if (dayStarted) {
+      stateMachineStatus = connStatus.isOnline ? 'LIVE' : 'OFFLINE';
+    }
 
     // Activity feed generated from actual database records
     const salesList = await all(
@@ -126,14 +148,23 @@ router.get('/dashboard', async (req, res) => {
 
     const closingList = await all(
       `SELECT 'CLOSING' as type, id, 
-              ('Stall 1 submitted daily closing (Stock: ' || stock_status || ', Money: ' || money_status || ')') as description, 
+              ('Stall 1 submitted daily closing (Money: ' || money_status || ')') as description, 
               submitted_at as created_at 
        FROM daily_closings WHERE business_date = ? AND status = 'ACTIVE' 
        ORDER BY id DESC LIMIT 15`,
       [today]
     );
 
-    const combinedActivity = [...salesList, ...dispatchList, ...receiptList, ...wastageList, ...closingList]
+    const failedClosingList = await all(
+      `SELECT 'FAILED_CLOSING' as type, id,
+              ('Closing attempt failed (' || (SELECT COUNT(*) FROM closing_attempts ca2 WHERE ca2.stall_id = ca.stall_id AND ca2.business_date = ca.business_date AND ca2.id <= ca.id) || ' total today)') as description,
+              attempted_at as created_at
+       FROM closing_attempts ca WHERE business_date = ?
+       ORDER BY id DESC LIMIT 15`,
+      [today]
+    );
+
+    const combinedActivity = [...salesList, ...dispatchList, ...receiptList, ...wastageList, ...closingList, ...failedClosingList]
       .filter(item => item.created_at)
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
       .slice(0, 20);
@@ -150,8 +181,10 @@ router.get('/dashboard', async (req, res) => {
         isOverSold,
         isLargeWastage,
         wastageBreakdown,
+        dayStarted,
+        dayClosed,
         closingSubmitted: !!closing,
-        closingStatus: closing ? closing.status : 'UNCLOSED'
+        closingStatus: closing ? closing.status : (dayStarted ? 'OPEN' : 'NOT_STARTED')
       },
       stall1Status: {
         id: 1,
@@ -163,7 +196,10 @@ router.get('/dashboard', async (req, res) => {
         revenue: totalRevenue,
         lastSaleTime: lastSale ? lastSale.created_at : null,
         isOnline: connStatus.isOnline,
-        lastSeen: connStatus.lastSeen
+        lastSeen: connStatus.lastSeen,
+        status: stateMachineStatus,
+        started_at: latestSession ? latestSession.started_at : null,
+        closed_at: closing ? closing.submitted_at : null
       },
       closing: closing ? {
         stock_status: closing.stock_status,
@@ -304,6 +340,25 @@ router.post('/reopen-day', async (req, res) => {
        WHERE id = ?`,
       [reason, req.user.id, utcTimestamp, closing.id]
     );
+
+    // Re-mark session active so the stall can go Live again (T1.5-1)
+    const existingSession = await get(
+      `SELECT id FROM stall_sessions WHERE stall_id = ? AND business_date = ? ORDER BY id DESC LIMIT 1`,
+      [stall_id, business_date]
+    );
+
+    if (existingSession) {
+      await run(
+        `UPDATE stall_sessions SET status = 'ACTIVE' WHERE id = ?`,
+        [existingSession.id]
+      );
+    } else {
+      await run(
+        `INSERT INTO stall_sessions (stall_id, business_date, started_at, started_by, status)
+         VALUES (?, ?, ?, ?, 'ACTIVE')`,
+        [stall_id, business_date, utcTimestamp, req.user.id]
+      );
+    }
 
     // Broadcast Real-Time Event
     broadcastEvent('STALL_ACTION', {
