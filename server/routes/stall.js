@@ -262,12 +262,13 @@ router.post('/sell-parcel', requireActiveSession, async (req, res) => {
     }
 
     const utcTimestamp = getUTCTimestamp();
-    const parcelSellingPrice = 120.0;
+    const product = await get('SELECT * FROM products WHERE id = 1');
+    const unitSellingPrice = product ? product.selling_price : 40.0;
 
     await run(
       `INSERT INTO sales (stall_id, product_id, quantity, selling_price, created_at, created_by, business_date, idempotency_key)
        VALUES (?, 1, 3, ?, ?, ?, ?, ?)`,
-      [stallId, parcelSellingPrice, utcTimestamp, req.user.id, today, idempotency_key]
+      [stallId, unitSellingPrice, utcTimestamp, req.user.id, today, idempotency_key]
     );
 
     const { soldToday: newSoldToday } = await getStockCounts(stallId, today);
@@ -334,7 +335,7 @@ router.post('/undo-last', requireActiveSession, async (req, res) => {
     const utcTimestamp = getUTCTimestamp();
     const undoIdempotencyKey = `undo_${lastSale.id}_${nowTime}`;
     const undoQuantity = -lastSale.quantity;
-    const undoPrice = -lastSale.selling_price;
+    const undoPrice = lastSale.selling_price;
 
     await run(
       `INSERT INTO sales (stall_id, product_id, quantity, selling_price, created_at, created_by, business_date, idempotency_key, reversal_of, reversal_reason)
@@ -498,7 +499,7 @@ router.post('/close-day', requireActiveSession, async (req, res) => {
     const today = getISTBusinessDate();
     const utcTimestamp = getUTCTimestamp();
 
-    const { cash_received, upi_received } = req.body;
+    const { cash_received, upi_received, confirm_mismatch } = req.body;
 
     const cash = Number(cash_received);
     const upi = Number(upi_received);
@@ -516,10 +517,10 @@ router.post('/close-day', requireActiveSession, async (req, res) => {
       return res.status(409).json({ error: 'Daily closing has already been submitted for today.' });
     }
 
-    // Expected revenue = SUM(selling_price) net of reversals (T1.6-4 calculation)
+    // Expected revenue = SUM(quantity * selling_price) net of reversals
     const salesRow = await get(
       `SELECT COALESCE(SUM(quantity), 0) as total_sold, 
-              COALESCE(SUM(selling_price), 0) as total_revenue 
+              COALESCE(SUM(quantity * selling_price), 0) as total_revenue 
        FROM sales WHERE stall_id = ? AND business_date = ?`,
       [stallId, today]
     );
@@ -528,8 +529,8 @@ router.post('/close-day', requireActiveSession, async (req, res) => {
     const expectedRevenue = salesRow ? salesRow.total_revenue : 0;
     const totalReceived = cash + upi;
 
-    // IF AMOUNT DOES NOT MATCH EXPECTED REVENUE EXACTLY:
-    if (totalReceived !== expectedRevenue) {
+    // IF AMOUNT DOES NOT MATCH EXPECTED REVENUE AND CONFIRMATION IS NOT PRESENT:
+    if (totalReceived !== expectedRevenue && !confirm_mismatch) {
       await run(
         `INSERT INTO closing_attempts (business_date, stall_id, attempted_at, cash_received, upi_received)
          VALUES (?, ?, ?, ?, ?)`,
@@ -551,7 +552,10 @@ router.post('/close-day', requireActiveSession, async (req, res) => {
         text: `Closing attempt failed (${failedTotal} total today)`
       });
 
-      return res.status(409).json({ error: "Amount doesn't match. Please recheck and re-enter." });
+      return res.status(409).json({
+        error: "Amount doesn't match. Re-check, or close anyway.",
+        code: "MISMATCH"
+      });
     }
 
     const { stockReceived, wastageToday } = await getStockCounts(stallId, today);
@@ -559,9 +563,9 @@ router.post('/close-day', requireActiveSession, async (req, res) => {
     const expectedRemaining = actualRemaining;
     const stockVariance = 0;
     const stockVarianceValue = 0.0;
-    const moneyDifference = 0.0;
+    const moneyDifference = totalReceived - expectedRevenue;
     const stockStatus = 'MATCHED';
-    const moneyStatus = 'MATCHED';
+    const moneyStatus = moneyDifference === 0 ? 'MATCHED' : (moneyDifference < 0 ? 'SHORT' : 'EXTRA');
 
     const result = await run(
       `INSERT INTO daily_closings (

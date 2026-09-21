@@ -53,11 +53,11 @@ const all = (sql, params = []) => {
 
 // Initialize schema, pragmas, triggers, and seed data
 const initDb = async () => {
-  db.serialize(async () => {
+  try {
     // SQLite Pragmas
-    db.run('PRAGMA foreign_keys = ON');
-    db.run('PRAGMA journal_mode = WAL');
-    db.run('PRAGMA busy_timeout = 5000');
+    await run('PRAGMA foreign_keys = ON');
+    await run('PRAGMA journal_mode = WAL');
+    await run('PRAGMA busy_timeout = 5000');
 
     // Create Tables with CHECK constraints
     await run(`
@@ -123,6 +123,42 @@ const initDb = async () => {
         )
       )
     `);
+
+    // Ensure sales table has quantity IN (1, 3, -1, -3) CHECK constraint even if database existed prior
+    const salesTableInfo = await get(`SELECT sql FROM sqlite_master WHERE type='table' AND name='sales'`);
+    if (salesTableInfo && salesTableInfo.sql && (!salesTableInfo.sql.includes('3') || !salesTableInfo.sql.includes('(1, 3, -1, -3)'))) {
+      await run(`PRAGMA foreign_keys=OFF`);
+      await run(`DROP TRIGGER IF EXISTS prevent_sales_update`);
+      await run(`DROP TRIGGER IF EXISTS prevent_sales_delete`);
+      await run(`CREATE TABLE sales_migration_tmp (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        stall_id INTEGER NOT NULL REFERENCES stalls(id),
+        product_id INTEGER NOT NULL REFERENCES products(id),
+        quantity INTEGER NOT NULL CHECK(quantity IN (1, 3, -1, -3)),
+        selling_price REAL NOT NULL,
+        created_at TEXT NOT NULL,
+        created_by INTEGER NOT NULL REFERENCES users(id),
+        business_date TEXT NOT NULL,
+        idempotency_key TEXT UNIQUE NOT NULL,
+        reversal_of INTEGER UNIQUE REFERENCES sales(id),
+        reversal_reason TEXT,
+        CHECK (
+          (quantity IN (1, 3) AND reversal_of IS NULL) OR
+          (quantity IN (-1, -3) AND reversal_of IS NOT NULL)
+        )
+      )`);
+      await run(`INSERT INTO sales_migration_tmp SELECT * FROM sales`);
+      await run(`DROP TABLE sales`);
+      await run(`ALTER TABLE sales_migration_tmp RENAME TO sales`);
+      await run(`PRAGMA foreign_keys=ON`);
+    }
+
+    // Normalize any existing parcel sale rows to store unit price (40.0)
+    await run(`PRAGMA foreign_keys=OFF`);
+    await run(`DROP TRIGGER IF EXISTS prevent_sales_update`);
+    await run(`DROP TRIGGER IF EXISTS prevent_sales_delete`);
+    await run(`UPDATE sales SET selling_price = 40.0 WHERE (quantity = 3 OR quantity = -3) AND (selling_price = 120.0 OR selling_price = -120.0)`);
+    await run(`PRAGMA foreign_keys=ON`);
 
     await run(`
       CREATE TABLE IF NOT EXISTS wastages (
@@ -310,7 +346,9 @@ const initDb = async () => {
     }
 
     console.log('Database initialized successfully with pragmas, schema, triggers, and seed configuration.');
-  });
+  } catch (err) {
+    console.error('Error initializing database:', err);
+  }
 };
 
 initDb();

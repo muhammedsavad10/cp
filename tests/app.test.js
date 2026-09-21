@@ -216,9 +216,8 @@ test('7. Semi-Blind Closing math & Wrong revenue returns generic 409 without lea
   const today = getISTBusinessDate();
 
   // Get total sold today for stall 1
-  const salesRow = await get(`SELECT COALESCE(SUM(quantity), 0) as total FROM sales WHERE stall_id = 1 AND business_date = ?`, [today]);
-  const totalSold = salesRow ? salesRow.total : 0;
-  const expectedRev = totalSold * 40;
+  const revRow = await get(`SELECT COALESCE(SUM(quantity * selling_price), 0) as total FROM sales WHERE stall_id = 1 AND business_date = ?`, [today]);
+  const expectedRev = revRow ? revRow.total : 0;
 
   // Attempt closing with WRONG revenue (expectedRev + 100) -> fails with generic 409
   const wrongClose = await request('POST', '/api/stall/close-day', { Authorization: `Bearer ${stall1Token}` }, {
@@ -227,7 +226,8 @@ test('7. Semi-Blind Closing math & Wrong revenue returns generic 409 without lea
   });
 
   assert.equal(wrongClose.status, 409);
-  assert.equal(wrongClose.body.error, "Amount doesn't match. Please recheck and re-enter.");
+  assert.equal(wrongClose.body.error, "Amount doesn't match. Re-check, or close anyway.");
+  assert.equal(wrongClose.body.code, "MISMATCH");
   // Verify NO numbers are leaked in response body
   assert.equal(wrongClose.body.expected_revenue, undefined);
   assert.equal(wrongClose.body.actual_revenue, undefined);
@@ -467,20 +467,20 @@ test('16. T1.6-4: Parcel Sales (+3, ₹120), parcel undo (-3, -₹120), and reve
   assert.equal(pRes.status, 200);
   assert.equal(pRes.body.soldToday, 4); // 1 single + 3 parcel = 4 sold
 
-  // Check sales record in DB
+  // Check sales record in DB (unit price 40.0)
   const parcelRow = await get(`SELECT * FROM sales WHERE stall_id = 6 AND quantity = 3`);
   assert.ok(parcelRow);
-  assert.equal(parcelRow.selling_price, 120);
+  assert.equal(parcelRow.selling_price, 40);
 
   // 3. Undo last sale (should undo the parcel sale of 3 glasses at once)
   const undoRes = await request('POST', '/api/stall/undo-last', { Authorization: `Bearer ${s6Token}` });
   assert.equal(undoRes.status, 200);
 
-  // Verify DB reversal row: quantity = -3, selling_price = -120
+  // Verify DB reversal row: quantity = -3, selling_price = 40.0
   const revRow = await get(`SELECT * FROM sales WHERE stall_id = 6 AND reversal_of = ?`, [parcelRow.id]);
   assert.ok(revRow);
   assert.equal(revRow.quantity, -3);
-  assert.equal(revRow.selling_price, -120);
+  assert.equal(revRow.selling_price, 40);
 
   // Verify dashboard sold count is back to 1
   const dash = await request('GET', '/api/stall/dashboard', { Authorization: `Bearer ${s6Token}` });

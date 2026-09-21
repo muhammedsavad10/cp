@@ -18,6 +18,7 @@ export default function StallDashboard({ onLogout }) {
   const [customReceiptQty, setCustomReceiptQty] = useState('');
   const [lastSaleTime, setLastSaleTime] = useState(null);
   const [undoTimeLeft, setUndoTimeLeft] = useState(0);
+  const [lastSaleQuantity, setLastSaleQuantity] = useState(1);
   const [error, setError] = useState('');
 
   const undoTimerRef = useRef(null);
@@ -116,6 +117,7 @@ export default function StallDashboard({ onLogout }) {
 
       const now = new Date();
       setLastSaleTime(now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      setLastSaleQuantity(1);
       setUndoTimeLeft(10); // 10s UI window
       setError('');
       fetchDashboard();
@@ -147,6 +149,7 @@ export default function StallDashboard({ onLogout }) {
 
       const now = new Date();
       setLastSaleTime(now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      setLastSaleQuantity(3);
       setUndoTimeLeft(10);
       setError('');
       fetchDashboard();
@@ -344,49 +347,53 @@ export default function StallDashboard({ onLogout }) {
               <div className="hero-number num">{dashboard?.soldToday || 0}</div>
             </div>
 
-            {/* GIANT FULL-WIDTH SELL 1 BUTTON (~40% Viewport Height) */}
-            <button
-              type="button"
-              className="btn-giant-sell"
-              onClick={handleSellOne}
-              disabled={selling || (dashboard?.computedRemaining || 0) < 1}
-              style={{
-                opacity: (dashboard?.computedRemaining || 0) < 1 ? 0.6 : 1,
-                cursor: (dashboard?.computedRemaining || 0) < 1 ? 'not-allowed' : 'pointer'
-              }}
-            >
-              {(dashboard?.computedRemaining || 0) < 1 ? (
-                <span className="btn-giant-sell-label">ITEM FINISHED</span>
-              ) : showCheckAnim ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Check size={48} strokeWidth={2} />
-                  <span className="btn-giant-sell-label">RECORDED!</span>
-                </div>
-              ) : (
-                <>
-                  <span className="btn-giant-sell-label">SELL 1</span>
-                  <span className="btn-giant-sell-subtext">₹40 per glass</span>
-                </>
-              )}
-            </button>
+            {/* HERO SELLING STACK: 3/4 GLASS & 1/4 PARCEL (3:1 Vertical Height Ratio) */}
+            <div className="hero-sell-row">
+              <button
+                type="button"
+                className="btn-giant-sell"
+                onClick={handleSellOne}
+                disabled={selling || (dashboard?.computedRemaining || 0) < 1}
+                style={{
+                  opacity: (dashboard?.computedRemaining || 0) < 1 ? 0.6 : 1,
+                  cursor: (dashboard?.computedRemaining || 0) < 1 ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {(dashboard?.computedRemaining || 0) < 1 ? (
+                  <span className="btn-giant-sell-label" style={{ fontSize: '1.5rem' }}>ITEM FINISHED</span>
+                ) : showCheckAnim ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                    <Check size={36} strokeWidth={2} />
+                    <span className="btn-giant-sell-label" style={{ fontSize: '1.5rem' }}>RECORDED!</span>
+                  </div>
+                ) : (
+                  <>
+                    <span className="btn-giant-sell-label">GLASS</span>
+                    <span className="btn-giant-sell-subtext">₹40 per glass</span>
+                  </>
+                )}
+              </button>
 
-            {/* PARCEL SALE BUTTON (3 GLASSES - ₹120) */}
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{
-                width: '100%',
-                minHeight: '52px',
-                marginBottom: 'var(--spacing-3)',
-                fontWeight: 700,
-                fontSize: '1rem',
-                border: '2px solid var(--border-subtle)'
-              }}
-              onClick={handleSellParcel}
-              disabled={selling || (dashboard?.computedRemaining || 0) < 3}
-            >
-              {(dashboard?.computedRemaining || 0) < 3 ? 'Item finished' : 'Parcel (3 Glasses - ₹120)'}
-            </button>
+              <button
+                type="button"
+                className="btn-parcel-sell"
+                onClick={handleSellParcel}
+                disabled={selling || (dashboard?.computedRemaining || 0) < 3}
+                style={{
+                  opacity: (dashboard?.computedRemaining || 0) < 3 ? 0.5 : 1,
+                  cursor: (dashboard?.computedRemaining || 0) < 3 ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {(dashboard?.computedRemaining || 0) < 3 ? (
+                  <span className="btn-parcel-sell-label" style={{ fontSize: '1rem' }}>NO STOCK</span>
+                ) : (
+                  <>
+                    <span className="btn-parcel-sell-label">PARCEL</span>
+                    <span className="btn-parcel-sell-subtext">₹120 • 3 glasses</span>
+                  </>
+                )}
+              </button>
+            </div>
 
             {/* Stat Row: Received count & Last sale time */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 var(--spacing-2)', marginBottom: 'var(--spacing-3)', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
@@ -406,7 +413,7 @@ export default function StallDashboard({ onLogout }) {
                     disabled={undoing}
                   >
                     <RotateCcw size={16} strokeWidth={1.5} />
-                    <span>Undo Last Sale ({undoTimeLeft}s)</span>
+                    <span>{lastSaleQuantity === 3 ? `Undo parcel (3) (${undoTimeLeft}s)` : `Undo (${undoTimeLeft}s)`}</span>
                   </button>
                 </div>
                 <div className="undo-progress-bar" style={{ width: `${(undoTimeLeft / 10) * 100}%` }} />

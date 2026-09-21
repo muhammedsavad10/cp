@@ -265,11 +265,20 @@ html, body {
   background-color: rgba(24, 22, 20, 0.04);
 }
 
-/* GIANT SELL 1 BUTTON (~40% Viewport Height) */
+/* GIANT HERO SELLING ACTION ROW (Vertical 3:1 Ratio - Stacked Up/Down) */
+.hero-sell-row {
+  display: grid;
+  grid-template-rows: 3fr 1fr;
+  gap: var(--spacing-3);
+  margin: var(--spacing-3) 0;
+  width: 100%;
+  height: 48vh;
+  min-height: 340px;
+}
+
 .btn-giant-sell {
   width: 100%;
-  height: 38vh;
-  min-height: 220px;
+  height: 100%;
   background: linear-gradient(135deg, #C25E00 0%, #A34E00 100%);
   color: var(--brand-contrast);
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -278,20 +287,40 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--spacing-2);
+  gap: var(--spacing-1);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), var(--shadow-hero);
   cursor: pointer;
   transition: transform 0.1s ease, filter 0.15s ease;
-  margin: var(--spacing-3) 0;
+  margin: 0;
 }
 
-.btn-giant-sell:active:not(:disabled) {
-  transform: scale(0.96);
-  background-color: var(--brand-hover);
+.btn-giant-sell:active:not(:disabled),
+.btn-parcel-sell:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn-parcel-sell {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #064E3B 0%, #04392B 100%);
+  color: #FFFFFF;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), var(--shadow-md);
+  cursor: pointer;
+  transition: transform 0.1s ease, filter 0.15s ease;
+  margin: 0;
+  padding: 0 var(--spacing-3);
+  text-align: center;
 }
 
 .btn-giant-sell-label {
-  font-size: 2.25rem;
+  font-size: 2.5rem;
   font-weight: 900;
   letter-spacing: 1px;
 }
@@ -300,6 +329,24 @@ html, body {
   font-size: 1.125rem;
   font-weight: 600;
   opacity: 0.9;
+}
+
+.btn-parcel-sell-label {
+  font-size: 1.25rem;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+}
+
+.btn-parcel-sell-subtext {
+  font-size: 1rem;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.btn-parcel-sell-subtext {
+  font-size: 1rem;
+  font-weight: 700;
+  opacity: 0.95;
 }
 
 /* Hero Selling Screen Layout */

@@ -278,7 +278,7 @@ export default function AdminDashboard({ onLogout }) {
                 <div className="kpi-card">
                   <div className="kpi-label">Sold</div>
                   <div className="kpi-val num" style={{ fontSize: '1.25rem', fontWeight: 800 }}>
-                    {stall1.sold || 0} <span style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--text-secondary)' }}>({(stall1.received || 0) - (stall1.sold || 0)} remaining)</span>
+                    {stall1.sold || 0} <span style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--text-secondary)' }}>({stall1.expectedRemaining !== undefined ? stall1.expectedRemaining : ((stall1.received || 0) - (stall1.sold || 0) - (stall1.wastage || 0))} remaining)</span>
                   </div>
                 </div>
 
@@ -301,14 +301,14 @@ export default function AdminDashboard({ onLogout }) {
                 <div className="kpi-card">
                   <div className="kpi-label">Total Sales</div>
                   <div className="kpi-val num">
-                    {closing ? `₹${(stall1.revenue || 0).toLocaleString('en-IN')}` : '—'}
+                    {closing ? `₹${(stall1.revenue || 0).toLocaleString('en-IN')}` : `₹${(stall1.revenue || 0).toLocaleString('en-IN')}`}
                   </div>
                 </div>
 
                 <div className="kpi-card">
-                  <div className="kpi-label">Profit</div>
+                  <div className="kpi-label">Est. profit (before staff cost)</div>
                   <div className="kpi-val num">
-                    {closing ? `₹${(stall1.profit !== undefined ? stall1.profit : (stall1.revenue - (stall1.sold * 20)) || 0).toLocaleString('en-IN')}` : '—'}
+                    ₹{(stall1.profit !== undefined ? stall1.profit : 0).toLocaleString('en-IN')}
                   </div>
                 </div>
               </div>

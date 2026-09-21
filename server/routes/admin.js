@@ -26,28 +26,18 @@ router.get('/dashboard', async (req, res) => {
   try {
     const today = getISTBusinessDate();
 
+    const product = await get('SELECT * FROM products WHERE id = 1');
+    const directCost = product ? product.direct_cost : 20.0;
+
     // Sales metrics (reversals net out)
     const salesRow = await get(
       `SELECT COALESCE(SUM(quantity), 0) as total_sold, 
-              COALESCE(SUM(selling_price), 0) as total_revenue 
+              COALESCE(SUM(quantity * selling_price), 0) as total_revenue 
        FROM sales WHERE business_date = ?`,
       [today]
     );
     const totalSold = salesRow ? salesRow.total_sold : 0;
     const totalRevenue = salesRow ? salesRow.total_revenue : 0;
-    const profit = totalRevenue - (totalSold * 20.0);
-
-    // Count of reversals today
-    const reversalRow = await get(
-      `SELECT COUNT(*) as count FROM sales WHERE business_date = ? AND quantity = -1`,
-      [today]
-    );
-    const reversalsToday = reversalRow ? reversalRow.count : 0;
-
-    // Last sale timestamp
-    const lastSale = await get(
-      `SELECT created_at FROM sales WHERE stall_id = 1 ORDER BY id DESC LIMIT 1`
-    );
 
     // Stock received today (uses received_business_date)
     const stockRow = await get(
@@ -57,6 +47,28 @@ router.get('/dashboard', async (req, res) => {
       [today]
     );
     const totalStockReceived = stockRow ? stockRow.total : 0;
+
+    // Est. profit (before staff cost) = Total Sales - (totalStockReceived * direct_cost)
+    const profit = totalRevenue - (totalStockReceived * directCost);
+
+    // Count of reversals today
+    const reversalRow = await get(
+      `SELECT COUNT(*) as count FROM sales WHERE business_date = ? AND quantity < 0`,
+      [today]
+    );
+    const reversalsToday = reversalRow ? reversalRow.count : 0;
+
+    // Failed closing attempts count
+    const failedAttemptsRow = await get(
+      `SELECT COUNT(*) as count FROM closing_attempts WHERE stall_id = 1 AND business_date = ?`,
+      [today]
+    );
+    const failedAttemptsCount = failedAttemptsRow ? failedAttemptsRow.count : 0;
+
+    // Last sale timestamp
+    const lastSale = await get(
+      `SELECT created_at FROM sales WHERE stall_id = 1 ORDER BY id DESC LIMIT 1`
+    );
 
     // Wastage today
     const wastageRow = await get(
@@ -99,8 +111,6 @@ router.get('/dashboard', async (req, res) => {
 
     const connStatus = getStallStatus(1);
 
-    // State machine status calculation:
-    // NOT_STARTED -> LIVE (started + open + websocket connected) -> OFFLINE (started + open + websocket disconnected) -> CLOSED (closed)
     let stateMachineStatus = 'NOT_STARTED';
     if (dayClosed) {
       stateMachineStatus = 'CLOSED';
@@ -112,6 +122,8 @@ router.get('/dashboard', async (req, res) => {
     const salesList = await all(
       `SELECT 'SALE' as type, id, 
               CASE WHEN quantity = 1 THEN 'Stall 1 sold 1 Butter Fruit Payasam' 
+                   WHEN quantity = 3 THEN 'Stall 1 sold 1 Parcel (3 glasses)'
+                   WHEN quantity = -3 THEN 'Stall 1 reversed Parcel (3 glasses)'
                    ELSE 'Stall 1 reversed sale #' || reversal_of END as description, 
               created_at 
        FROM sales WHERE business_date = ? 
@@ -185,7 +197,8 @@ router.get('/dashboard', async (req, res) => {
         dayStarted,
         dayClosed,
         closingSubmitted: !!closing,
-        closingStatus: closing ? closing.status : (dayStarted ? 'OPEN' : 'NOT_STARTED')
+        closingStatus: closing ? closing.status : (dayStarted ? 'OPEN' : 'NOT_STARTED'),
+        failedAttemptsCount
       },
       stall1Status: {
         id: 1,
@@ -200,6 +213,7 @@ router.get('/dashboard', async (req, res) => {
         isOnline: connStatus.isOnline,
         lastSeen: connStatus.lastSeen,
         status: stateMachineStatus,
+        failedAttemptsCount,
         started_at: latestSession ? latestSession.started_at : null,
         closed_at: closing ? closing.submitted_at : null
       },
