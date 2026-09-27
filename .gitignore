@@ -9,3 +9,4 @@ data_*/
 *.db-wal
 *.bak
 .env
+scratch/

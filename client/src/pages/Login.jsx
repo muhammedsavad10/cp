@@ -9,12 +9,10 @@ export default function Login({ onLoginSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleLogin = async (e, demoEmail, demoPass) => {
+  const handleLogin = async (e) => {
     if (e) e.preventDefault();
-    const loginEmail = demoEmail || email;
-    const loginPass = demoPass || password;
 
-    if (!loginEmail || !loginPass) {
+    if (!email || !password) {
       setError('Please enter both email and password.');
       return;
     }
@@ -23,7 +21,7 @@ export default function Login({ onLoginSuccess }) {
     setError('');
 
     try {
-      const data = await api.login({ email: loginEmail, password: loginPass });
+      const data = await api.login({ email, password });
       setToken(data.token);
       setUser(data.user);
       onLoginSuccess(data.user);
@@ -35,10 +33,10 @@ export default function Login({ onLoginSuccess }) {
   };
 
   return (
-    <div className="worker-container" style={{ justifyContent: 'center', padding: 'var(--spacing-4)' }}>
-      <div className="card" style={{ padding: 'var(--spacing-6)', boxShadow: 'var(--shadow-md)' }}>
-        <div style={{ textAlign: 'center', marginBottom: 'var(--spacing-6)' }}>
-          <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '0.5px' }}>
+    <div className="worker-container" style={{ padding: 'var(--spacing-4)' }}>
+      <div className="card" style={{ margin: 'auto 0', padding: 'var(--spacing-5) var(--spacing-4)', boxShadow: 'var(--shadow-md)', width: '100%' }}>
+        <div style={{ textAlign: 'center', marginBottom: 'var(--spacing-5)' }}>
+          <h1 style={{ fontSize: 'clamp(1.35rem, 5vw, 1.75rem)', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '0.5px' }}>
             COLD PAYASAM
           </h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.9375rem', fontWeight: 500, marginTop: 'var(--spacing-1)' }}>
@@ -106,30 +104,7 @@ export default function Login({ onLoginSuccess }) {
           </button>
         </form>
 
-        <div style={{ marginTop: 'var(--spacing-6)', paddingTop: 'var(--spacing-4)', borderTop: '1px solid var(--border-subtle)', textAlign: 'center' }}>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 'var(--spacing-3)' }}>
-            Demo Quick Access
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-2)' }}>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{ fontSize: '0.875rem' }}
-              onClick={() => handleLogin(null, 'stall1@test.com', 'stall123')}
-            >
-              Stall Worker
-            </button>
 
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{ fontSize: '0.875rem' }}
-              onClick={() => handleLogin(null, 'admin@test.com', 'admin123')}
-            >
-              System Admin
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

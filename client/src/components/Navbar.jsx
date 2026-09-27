@@ -16,7 +16,7 @@ export default function Navbar({ onLogout }) {
       <div className="top-bar-title">
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>COLD PAYASAM</span>
         <span style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0 }}>
-          &bull; {user?.role === 'ADMIN' ? 'Admin Portal' : 'Stall 1'}
+          &bull; {user?.role === 'ADMIN' ? 'Admin' : 'Stall'}
         </span>
       </div>
 
@@ -24,7 +24,7 @@ export default function Navbar({ onLogout }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', flexShrink: 0 }}>
           <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}>
             <User size={16} strokeWidth={1.5} />
-            {user.name}
+            { }
           </span>
           <button
             onClick={handleLogout}
